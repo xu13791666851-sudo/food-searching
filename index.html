@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>今天吃什么</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div class="brand-row">
+          <span class="brand-mark">食</span>
+          <div>
+            <strong>今天吃什么</strong>
+            <small>像懂吃的朋友一样帮你定</small>
+          </div>
+        </div>
+        <div class="weather-pill">上海 · 小雨 · 24°C</div>
+        <h1>今天这顿，我帮你定。</h1>
+        <p id="assistantLine">先选在家吃还是外面吃，后面只问最关键的几件事。</p>
+      </header>
+
+      <section class="progress-wrap" aria-label="推荐进度">
+        <div class="progress-meta">
+          <strong id="stepTitle">第 1 步 / 共 4 步</strong>
+          <span id="stepHint">先选吃饭场景</span>
+        </div>
+        <div class="progress-track">
+          <span id="progressBar"></span>
+        </div>
+      </section>
+
+      <section class="workspace" id="workspace" aria-live="polite"></section>
+    </main>
+
+    <section class="prototype-gallery" aria-label="视觉原型图">
+      <div>
+        <p class="eyebrow">手机演示原型</p>
+        <h2>可以发给朋友看的视觉方向</h2>
+        <p>下面是新生成的手机原型图，实际可点击版本以上面的网页为主。</p>
+      </div>
+      <div class="gallery-grid">
+        <figure>
+          <img src="assets/mockup-mobile-home.png" alt="手机入口页演示原型" />
+          <figcaption>入口</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/mockup-mobile-saved-list.png" alt="手机菜品列表页演示原型" />
+          <figcaption>菜品列表</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/mockup-mobile-preference.png" alt="手机偏好推荐页演示原型" />
+          <figcaption>偏好推荐</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/mockup-mobile-out.png" alt="手机外面吃结果页演示原型" />
+          <figcaption>外面吃</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <script src="app.js"></script>
+  </body>
+</html>

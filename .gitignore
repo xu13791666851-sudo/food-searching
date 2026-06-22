@@ -1,0 +1,16 @@
+# Local/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary browser/test files
+.browser-profile-*/
+mobile-check.png
+prototype-check.png
+
+# Dependencies/build output, if added later
+node_modules/
+dist/
+build/
+.cache/
