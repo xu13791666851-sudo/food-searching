@@ -845,3 +845,271 @@ figcaption {
     flex: 1;
   }
 }
+
+/* Retro bistro reconstruction layer */
+:root {
+  --bg: #f8ecd2;
+  --surface: #fff6dc;
+  --surface-soft: #ffe7c1;
+  --line: #1d1913;
+  --text: #17130f;
+  --muted: #665943;
+  --tomato: #cf3b1e;
+  --tomato-dark: #9f2715;
+  --green: #638a34;
+  --green-soft: #e4edc2;
+  --yellow: #e69a17;
+  --blue-soft: #f4e3ba;
+  --shadow: 6px 6px 0 #17130f;
+}
+
+body {
+  background:
+    radial-gradient(circle at 18% 10%, rgba(207, 59, 30, 0.08), transparent 20%),
+    radial-gradient(circle at 84% 18%, rgba(99, 138, 52, 0.08), transparent 18%),
+    repeating-linear-gradient(0deg, rgba(29, 25, 19, 0.025) 0 1px, transparent 1px 5px),
+    #f8ecd2;
+}
+
+.app-shell {
+  max-width: 460px;
+  border-left: 4px solid var(--line);
+  border-right: 4px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 247, 221, 0.96), rgba(248, 236, 210, 0.98)),
+    repeating-linear-gradient(45deg, rgba(29, 25, 19, 0.025) 0 2px, transparent 2px 7px);
+}
+
+.hero,
+.simple-block,
+.quick-select,
+.dish-uploader,
+.final-panel,
+.feedback-panel,
+.prototype-gallery,
+.mini-list,
+.candidate,
+.saved-dish-card,
+figure {
+  border: 3px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 5px 5px 0 #17130f;
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding-top: 54px;
+  background:
+    linear-gradient(90deg, var(--tomato) 0 12px, transparent 12px 24px) top left / 48px 18px repeat-x,
+    linear-gradient(180deg, #fff7df, #f9e9c5);
+}
+
+.hero::after {
+  content: "别纠结";
+  position: absolute;
+  right: 14px;
+  top: 54px;
+  transform: rotate(-8deg);
+  padding: 7px 11px;
+  border: 3px solid var(--line);
+  border-radius: 8px;
+  background: var(--green);
+  color: #111;
+  font-size: 13px;
+  font-weight: 900;
+  box-shadow: 3px 3px 0 #17130f;
+}
+
+.brand-row {
+  align-items: flex-start;
+}
+
+.brand-row strong {
+  color: var(--tomato);
+  font-size: 28px;
+  font-weight: 1000;
+  letter-spacing: 0;
+  text-shadow: 2px 2px 0 #ffd36d;
+}
+
+.brand-row small {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.brand-mark {
+  border: 3px solid var(--line);
+  background: var(--tomato);
+  box-shadow: 3px 3px 0 #17130f;
+}
+
+.weather-pill {
+  border: 2px solid var(--line);
+  background: #fff8df;
+  color: var(--text);
+  box-shadow: 3px 3px 0 rgba(29, 25, 19, 0.22);
+}
+
+.hero h1,
+.section-title h2,
+.final-panel h2 {
+  color: var(--text);
+  font-weight: 1000;
+  letter-spacing: 0;
+  text-shadow: 2px 2px 0 rgba(230, 154, 23, 0.42);
+}
+
+.hero h1 {
+  max-width: 88%;
+  font-size: 35px;
+}
+
+.progress-track {
+  border: 2px solid var(--line);
+  background: #fff8df;
+}
+
+.progress-track span {
+  background: linear-gradient(90deg, var(--tomato), var(--yellow));
+}
+
+.progress-meta strong,
+.progress-meta span {
+  font-weight: 900;
+}
+
+.eyebrow {
+  display: inline-flex;
+  padding: 5px 9px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: var(--tomato);
+  color: #fff7df;
+  box-shadow: 2px 2px 0 #17130f;
+}
+
+.taste-strip span,
+.mini-list span,
+.metric-row span {
+  border: 2px solid var(--line);
+  background: #fff8df;
+  color: var(--text);
+  box-shadow: 2px 2px 0 rgba(29, 25, 19, 0.18);
+}
+
+.big-choice {
+  min-height: 170px;
+  border: 4px solid var(--line);
+  border-radius: 14px;
+  background: #fff7df;
+  box-shadow: var(--shadow);
+}
+
+.big-choice strong {
+  color: #fff7df;
+  font-size: 34px;
+  text-shadow: 3px 3px 0 rgba(29, 25, 19, 0.35);
+}
+
+.big-choice small {
+  z-index: 1;
+  max-width: 210px;
+  color: #17130f;
+  font-weight: 900;
+}
+
+.big-choice:nth-child(1) {
+  background:
+    linear-gradient(100deg, rgba(99, 138, 52, 0.95) 0 48%, transparent 49%),
+    radial-gradient(circle at 82% 42%, #ffb07b 0 14%, transparent 15%),
+    radial-gradient(circle at 74% 56%, #4f9a3d 0 18%, transparent 19%),
+    linear-gradient(135deg, #f8ead0, #fff8df);
+}
+
+.big-choice:nth-child(2) {
+  background:
+    linear-gradient(100deg, rgba(207, 59, 30, 0.96) 0 48%, transparent 49%),
+    radial-gradient(circle at 80% 42%, #7b3f22 0 18%, transparent 19%),
+    repeating-linear-gradient(28deg, #e9c66f 0 8px, #f6df98 8px 16px);
+}
+
+.big-choice::after {
+  display: none;
+}
+
+.choice-icon {
+  z-index: 1;
+  border: 3px solid #fff8df;
+  box-shadow: 3px 3px 0 #17130f;
+}
+
+.chip,
+.mini-chip,
+.primary-button,
+.secondary-button,
+.select-button,
+.tiny-button,
+.feedback-options button,
+.dish-name-input,
+.feedback-panel textarea {
+  border: 3px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 3px 3px 0 #17130f;
+}
+
+.primary-button,
+.select-button {
+  background: var(--tomato);
+  color: #fff8df;
+}
+
+.secondary-button,
+.tiny-button {
+  background: #fff8df;
+}
+
+.chip.selected,
+.mini-chip.selected,
+.feedback-options button.selected,
+.select-button.selected {
+  background: var(--green);
+  color: #fff8df;
+  border-color: var(--line);
+}
+
+.image-picker {
+  border: 3px dashed var(--line);
+  background: var(--green-soft);
+  color: var(--text);
+}
+
+.dish-thumb,
+.food-shot,
+.candidate-image {
+  border: 3px solid var(--line);
+}
+
+.final-panel {
+  background:
+    radial-gradient(circle at 88% 25%, rgba(230, 154, 23, 0.18), transparent 25%),
+    linear-gradient(135deg, #fff7df, #f8d8ad);
+}
+
+.final-panel-active::before {
+  content: "推荐";
+  border: 2px solid var(--line);
+  background: var(--green);
+  color: #fff8df;
+  box-shadow: 2px 2px 0 #17130f;
+}
+
+.weather-note {
+  border: 2px solid var(--line);
+  background: var(--green-soft);
+  color: var(--text);
+}
+
+.prototype-gallery {
+  background: #fff7df;
+}
