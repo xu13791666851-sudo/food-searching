@@ -226,6 +226,16 @@ function setState(next) {
   render();
 }
 
+function chooseItem(id) {
+  setState({ selectedId: id });
+  setTimeout(() => {
+    const panel = $("#finalChoice");
+    if (panel && panel.scrollIntoView) {
+      panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, 0);
+}
+
 function reset() {
   Object.assign(state, {
     step: 1,
@@ -363,7 +373,7 @@ function renderSavedDishList() {
     ${
       pickedDish
         ? `
-      <section class="final-panel">
+      <section class="final-panel final-panel-active" id="finalChoice">
         <p class="eyebrow">已选择</p>
         <h2>今天在家吃：${pickedDish.name}</h2>
         <p>${pickedDish.reason}</p>
@@ -472,7 +482,7 @@ function renderResult() {
     <div class="candidate-list">
       ${list.map((item) => candidateCard(item)).join("")}
     </div>
-    <section class="final-panel">
+    <section class="final-panel final-panel-active" id="finalChoice">
       <p class="eyebrow">最终答案</p>
       <h2>今天就吃：${selected.name}</h2>
       <p>${selected.reason}</p>
@@ -486,7 +496,7 @@ function renderResult() {
     ${feedbackPanel(`${state.mode === "out" ? "外面吃" : "在家推荐"}：${selected.name}`)}
   `;
   document.querySelectorAll("[data-select]").forEach((button) => {
-    button.addEventListener("click", () => setState({ selectedId: button.dataset.select }));
+    button.addEventListener("click", () => chooseItem(button.dataset.select));
   });
   $("#restartInline").addEventListener("click", reset);
   $("#shuffleBtn").addEventListener("click", () => {
@@ -498,8 +508,9 @@ function renderResult() {
 }
 
 function candidateCard(item) {
+  const isSelected = (state.selectedId || getList()[0]?.id) === item.id;
   return `
-    <article class="candidate">
+    <article class="candidate ${isSelected ? "selected" : ""}">
       ${item.image ? `<img class="candidate-image" src="${item.image}" alt="${item.name}" />` : `<div class="food-shot ${foodShotClass(item)}"><span>${item.tag}</span></div>`}
       <div class="candidate-body">
         <strong>${item.name}</strong>
@@ -511,15 +522,16 @@ function candidateCard(item) {
           <span>${item.health}</span>
         </div>
       </div>
-      <button class="select-button" type="button" data-select="${item.id}">选它</button>
+      <button class="select-button ${isSelected ? "selected" : ""}" type="button" data-select="${item.id}">${isSelected ? "已选" : "选它"}</button>
     </article>
   `;
 }
 
 function savedDishCard(dish) {
   const isEditing = state.editingDishId === dish.id;
+  const isSelected = state.selectedId === dish.id;
   return `
-    <article class="saved-dish-card">
+    <article class="saved-dish-card ${isSelected ? "selected" : ""}">
       ${dish.image ? `<img class="dish-thumb" src="${dish.image}" alt="${dish.name}" />` : `<span class="dish-thumb fallback ${foodShotClass(dish)}">${dish.tag}</span>`}
       ${
         isEditing
@@ -538,7 +550,7 @@ function savedDishCard(dish) {
           <small>${dish.source}</small>
         </div>
         <div class="dish-card-actions">
-          <button class="select-button" type="button" data-pick-saved="${dish.id}">选它</button>
+          <button class="select-button ${isSelected ? "selected" : ""}" type="button" data-pick-saved="${dish.id}">${isSelected ? "已选" : "选它"}</button>
           <button class="tiny-button" type="button" data-edit-dish="${dish.id}">改名</button>
           <button class="tiny-button danger" type="button" data-delete-dish="${dish.id}">删除</button>
         </div>
@@ -559,7 +571,7 @@ function foodShotClass(item) {
 
 function bindSavedDishPicker() {
   document.querySelectorAll("[data-pick-saved]").forEach((button) => {
-    button.addEventListener("click", () => setState({ selectedId: button.dataset.pickSaved }));
+    button.addEventListener("click", () => chooseItem(button.dataset.pickSaved));
   });
 }
 
