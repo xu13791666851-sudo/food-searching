@@ -1113,3 +1113,163 @@ figure {
 .prototype-gallery {
   background: #fff7df;
 }
+
+/* Desktop/tablet adaptive layout */
+@media (min-width: 900px) {
+  body {
+    padding: 24px;
+  }
+
+  .app-shell {
+    width: min(1180px, 100%);
+    max-width: 1180px;
+    min-height: auto;
+    display: grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    gap: 22px;
+    padding: 22px;
+    border: 4px solid var(--line);
+    border-radius: 18px;
+    box-shadow: 10px 10px 0 #17130f;
+  }
+
+  .hero {
+    grid-row: 1 / span 2;
+    min-height: 620px;
+    align-self: start;
+    position: sticky;
+    top: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+
+  .hero h1 {
+    font-size: 46px;
+    line-height: 1.02;
+    max-width: 100%;
+    margin-top: 36px;
+  }
+
+  .brand-row strong {
+    font-size: 30px;
+  }
+
+  .progress-wrap,
+  .workspace {
+    grid-column: 2;
+  }
+
+  .progress-wrap {
+    margin: 0;
+  }
+
+  .workspace {
+    align-content: start;
+  }
+
+  .section-title h2 {
+    font-size: 34px;
+  }
+
+  .section-title.compact h2 {
+    font-size: 30px;
+  }
+
+  .big-choice-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .big-choice {
+    min-height: 230px;
+  }
+
+  .big-choice strong {
+    font-size: 40px;
+  }
+
+  .chip-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .quick-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .dish-form {
+    grid-template-columns: 180px minmax(0, 1fr) 150px;
+    align-items: center;
+  }
+
+  .image-picker {
+    min-height: 120px;
+  }
+
+  .dish-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .saved-dish-card {
+    grid-template-columns: 72px 1fr;
+  }
+
+  .dish-card-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+
+  .dish-card-actions button {
+    flex: 1;
+  }
+
+  .dish-thumb {
+    width: 72px;
+    height: 72px;
+  }
+
+  .candidate-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .candidate {
+    grid-template-columns: 1fr;
+    align-content: start;
+  }
+
+  .food-shot,
+  .candidate-image {
+    width: 100%;
+    height: 170px;
+  }
+
+  .select-button {
+    grid-column: 1 / -1;
+  }
+
+  .feedback-options {
+    max-width: 520px;
+  }
+
+  .prototype-gallery {
+    width: min(1180px, calc(100% - 48px));
+    max-width: 1180px;
+    border: 4px solid var(--line);
+    border-radius: 18px;
+    box-shadow: 10px 10px 0 #17130f;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1200px) {
+  .app-shell {
+    grid-template-columns: 400px minmax(0, 1fr);
+  }
+
+  .hero h1 {
+    font-size: 52px;
+  }
+}
