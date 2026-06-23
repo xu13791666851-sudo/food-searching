@@ -442,6 +442,13 @@ p {
   background: #fff;
 }
 
+.saved-dish-card.selected,
+.candidate.selected {
+  border-color: var(--tomato);
+  background: linear-gradient(135deg, #fff, #fff0e8);
+  box-shadow: 0 12px 28px rgba(232, 59, 47, 0.14);
+}
+
 .dish-card-actions {
   display: flex;
   flex-wrap: wrap;
@@ -571,6 +578,12 @@ p {
   grid-column: 1 / -1;
 }
 
+.select-button.selected {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+
 .food-shot,
 .candidate-image {
   width: 72px;
@@ -631,6 +644,23 @@ p {
 .final-panel {
   background: linear-gradient(135deg, #fff, #fff0e8);
   border-color: rgba(232, 59, 47, 0.4);
+}
+
+.final-panel-active {
+  position: relative;
+  box-shadow: 0 16px 36px rgba(232, 59, 47, 0.16);
+}
+
+.final-panel-active::before {
+  content: "已为你定好";
+  display: inline-flex;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--tomato);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .feedback-panel {
