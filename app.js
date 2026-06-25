@@ -625,47 +625,144 @@ function feedbackPanel(target) {
     <section class="feedback-panel">
       <div class="section-title compact">
         <p class="eyebrow">试用反馈</p>
-        <h2>这个结果准吗？</h2>
-        <p class="muted-line">朋友点一下就能反馈，方便你判断下一步怎么改。</p>
+        <h2>帮我留一句真实感受</h2>
+        <p class="muted-line">点几下就能生成反馈，你可以直接复制发给我。</p>
       </div>
-      <div class="feedback-options">
-        <button type="button" data-feedback-score="会吃">会吃</button>
-        <button type="button" data-feedback-score="一般">一般</button>
-        <button type="button" data-feedback-score="不想吃">不想吃</button>
+
+      <div class="feedback-group">
+        <p>这个结果你会吃吗？</p>
+        <div class="feedback-options">
+          <button type="button" data-feedback-group="choice" data-feedback-value="会吃">会吃</button>
+          <button type="button" data-feedback-group="choice" data-feedback-value="可能会">可能会</button>
+          <button type="button" data-feedback-group="choice" data-feedback-value="不会吃">不会吃</button>
+        </div>
       </div>
-      <textarea id="feedbackText" rows="3" placeholder="哪里准或不准？可以随便写一句"></textarea>
-      <button class="primary-button" type="button" id="saveFeedbackBtn" data-feedback-target="${escapeHtml(target)}">提交反馈</button>
+
+      <div class="feedback-group">
+        <p>推荐准不准？</p>
+        <div class="feedback-options">
+          <button type="button" data-feedback-group="accuracy" data-feedback-value="挺准">挺准</button>
+          <button type="button" data-feedback-group="accuracy" data-feedback-value="一般">一般</button>
+          <button type="button" data-feedback-group="accuracy" data-feedback-value="不准">不准</button>
+        </div>
+      </div>
+
+      <div class="feedback-group">
+        <p>整个过程感觉怎么样？</p>
+        <div class="feedback-options">
+          <button type="button" data-feedback-group="flow" data-feedback-value="轻松">轻松</button>
+          <button type="button" data-feedback-group="flow" data-feedback-value="有点多">有点多</button>
+          <button type="button" data-feedback-group="flow" data-feedback-value="看不懂">看不懂</button>
+        </div>
+      </div>
+
+      <textarea id="feedbackText" rows="3" placeholder="哪里好用、哪里麻烦、你还希望它推荐什么？"></textarea>
+      <div class="feedback-actions">
+        <button class="primary-button" type="button" id="saveFeedbackBtn" data-feedback-target="${escapeHtml(target)}">保存反馈</button>
+        <button class="secondary-button" type="button" id="copyFeedbackBtn" data-feedback-target="${escapeHtml(target)}">复制反馈</button>
+      </div>
       <p class="form-message">${state.feedbackMessage}</p>
     </section>
   `;
 }
 
 function bindFeedback() {
-  let selectedScore = "";
-  document.querySelectorAll("[data-feedback-score]").forEach((button) => {
+  document.querySelectorAll("[data-feedback-group]").forEach((button) => {
     button.addEventListener("click", () => {
-      selectedScore = button.dataset.feedbackScore;
-      document.querySelectorAll("[data-feedback-score]").forEach((item) => item.classList.remove("selected"));
+      const group = button.dataset.feedbackGroup;
+      document.querySelectorAll(`[data-feedback-group="${group}"]`).forEach((item) => item.classList.remove("selected"));
       button.classList.add("selected");
     });
   });
 
   const saveButton = $("#saveFeedbackBtn");
-  if (!saveButton) return;
-  saveButton.addEventListener("click", () => {
+  const copyButton = $("#copyFeedbackBtn");
+  if (!saveButton || !copyButton) return;
+
+  saveButton.addEventListener("click", async () => {
+    const result = collectFeedback(saveButton.dataset.feedbackTarget);
     const feedback = loadJson(FEEDBACK_KEY, []);
-    const textInput = $("#feedbackText");
-    feedback.unshift({
-      target: saveButton.dataset.feedbackTarget,
-      score: selectedScore || "未选择",
-      text: textInput ? textInput.value.trim() : "",
-      time: new Date().toISOString(),
-    });
+    feedback.unshift(result);
     saveJson(FEEDBACK_KEY, feedback.slice(0, 50));
-    setState({ feedbackMessage: "已收到，朋友的反馈会保存在这个浏览器里。" });
+    const submitted = await submitFeedback(result);
+    setState({
+      feedbackMessage: submitted
+        ? "已提交到后台，也在本机留了一份备份。"
+        : "已保存在本机。后台暂时没连上，可以点“复制反馈”发给我。",
+    });
+  });
+
+  copyButton.addEventListener("click", async () => {
+    const result = collectFeedback(copyButton.dataset.feedbackTarget);
+    const text = formatFeedback(result);
+    const copied = await copyText(text);
+    setState({ feedbackMessage: copied ? "反馈内容已复制，可以直接发给我。" : "复制失败了，可以手动选中文字复制。" });
   });
 }
 
+function collectFeedback(target) {
+  const textInput = $("#feedbackText");
+  const readSelected = (group) => {
+    const selected = document.querySelector(`[data-feedback-group="${group}"].selected`);
+    return selected ? selected.dataset.feedbackValue : "未选择";
+  };
+
+  return {
+    target,
+    choice: readSelected("choice"),
+    accuracy: readSelected("accuracy"),
+    flow: readSelected("flow"),
+    text: textInput ? textInput.value.trim() : "",
+    time: new Date().toISOString(),
+  };
+}
+
+async function submitFeedback(result) {
+  try {
+    const response = await fetch("/api/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(result),
+    });
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+function formatFeedback(result) {
+  return [
+    "【今天吃什么试用反馈】",
+    "结果：" + result.target,
+    "会不会吃：" + result.choice,
+    "推荐准不准：" + result.accuracy,
+    "流程感受：" + result.flow,
+    "补充：" + (result.text || "无"),
+  ].join("\n");
+}
+
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall back to a temporary textarea below.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  return copied;
+}
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
