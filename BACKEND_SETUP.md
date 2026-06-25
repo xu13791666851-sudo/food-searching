@@ -57,3 +57,13 @@ https://food-searching.xu13791666851.workers.dev/api/feedback?token=my-food-secr
 ```
 
 如果配置成功，会看到朋友提交过的反馈数据。
+
+## 更方便的反馈看板
+
+现在也可以打开：
+
+```text
+https://你的域名/admin.html
+```
+
+输入 `FEEDBACK_ADMIN_TOKEN` 后，就能看到反馈总数、愿意吃的比例、推荐准不准、流程感受和具体留言。
