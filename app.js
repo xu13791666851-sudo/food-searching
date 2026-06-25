@@ -10,6 +10,7 @@ const state = {
   selectedId: "",
   editingDishId: "",
   feedbackMessage: "",
+  restaurantMessage: "",
 };
 
 const SAVED_DISH_KEY = "food-helper-saved-dishes";
@@ -20,6 +21,7 @@ let uploadedDishes = loadUploadedDishes();
 let dishOverrides = loadJson(DISH_OVERRIDES_KEY, {});
 let hiddenDishIds = loadJson(HIDDEN_DISH_KEY, []);
 let pendingDishImage = "";
+let liveEatOutFoods = [];
 
 const stepCopy = {
   scene: {
@@ -249,7 +251,9 @@ function reset() {
     selectedId: "",
     editingDishId: "",
     feedbackMessage: "",
+    restaurantMessage: "",
   });
+  liveEatOutFoods = [];
   render();
 }
 
@@ -432,14 +436,21 @@ function renderPreference() {
   bindChoice("health");
   $("#backBtn").addEventListener("click", () => setState({ step: state.mode === "home" ? 2 : 1 }));
   $("#nextBtn").addEventListener("click", () => {
+    if (state.mode === "out") {
+      liveEatOutFoods = [];
+    }
     setState({
       mood: state.mood || "热乎的",
       taste: state.taste || "鲜香",
       budget: state.budget || "20-40 元",
       time: state.time || "30 分钟内",
       health: state.health || "随意一点",
+      restaurantMessage: state.mode === "out" ? "正在获取你附近的真实餐厅..." : "",
       step: 4,
     });
+    if (state.mode === "out") {
+      loadNearbyRestaurants();
+    }
   });
 }
 
@@ -465,8 +476,53 @@ function bindChoice(key) {
 }
 
 function getList() {
-  if (state.mode === "out") return eatOutFoods;
+  if (state.mode === "out") return liveEatOutFoods.length ? liveEatOutFoods : eatOutFoods;
   return state.homeSource === "saved" ? getSavedDishList() : homeFoods;
+}
+
+function loadNearbyRestaurants() {
+  if (!navigator.geolocation) {
+    setState({ restaurantMessage: "当前浏览器不支持定位，先展示模拟推荐。" });
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      try {
+        const params = new URLSearchParams({
+          lat: String(position.coords.latitude),
+          lng: String(position.coords.longitude),
+          taste: state.taste,
+          budget: state.budget,
+          time: state.time,
+        });
+        const response = await fetch(`/api/restaurants?${params.toString()}`);
+        const data = await response.json();
+
+        if (!response.ok || !data.ok || !Array.isArray(data.restaurants) || !data.restaurants.length) {
+          throw new Error(data.message || "no restaurants");
+        }
+
+        liveEatOutFoods = data.restaurants.slice(0, 3);
+        setState({
+          selectedId: "",
+          restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅。`,
+        });
+      } catch {
+        liveEatOutFoods = [];
+        setState({ restaurantMessage: "真实餐厅暂时获取失败，先展示模拟推荐。" });
+      }
+    },
+    () => {
+      liveEatOutFoods = [];
+      setState({ restaurantMessage: "没有获得定位授权，先展示模拟推荐。" });
+    },
+    {
+      enableHighAccuracy: false,
+      timeout: 8000,
+      maximumAge: 300000,
+    }
+  );
 }
 
 function renderResult() {
@@ -478,6 +534,7 @@ function renderResult() {
       <p class="eyebrow">${state.mode === "out" ? "附近推荐" : state.homeSource === "saved" ? "从你的菜里挑" : "今天做这个"}</p>
       <h2>给你挑了 ${list.length} 个</h2>
       <p class="muted-line">${state.mood} · ${state.taste} · ${state.time}</p>
+      ${state.mode === "out" && state.restaurantMessage ? `<p class="form-message">${state.restaurantMessage}</p>` : ""}
     </div>
     <div class="candidate-list">
       ${list.map((item) => candidateCard(item)).join("")}
