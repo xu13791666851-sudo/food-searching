@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>反馈看板 | 今天吃什么</title>
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <main class="dashboard-shell">
+    <section class="hero-panel">
+      <div class="brand-mark">食</div>
+      <p class="eyebrow">反馈看板</p>
+      <h1>朋友试用后，结果都在这里。</h1>
+      <p class="hero-copy">输入你的后台 token，查看推荐结果是否真的帮朋友做了决定。</p>
+    </section>
+
+    <section class="control-panel">
+      <label for="tokenInput">后台 token</label>
+      <div class="token-row">
+        <input id="tokenInput" type="password" placeholder="输入 FEEDBACK_ADMIN_TOKEN" autocomplete="off" />
+        <button id="loadButton" type="button">查看反馈</button>
+      </div>
+      <p id="statusText" class="status-text">token 只会保存在当前浏览器里，方便你下次查看。</p>
+    </section>
+
+    <section class="metric-grid" aria-label="反馈概览">
+      <article class="metric-card">
+        <span>反馈总数</span>
+        <strong id="totalCount">0</strong>
+      </article>
+      <article class="metric-card">
+        <span>愿意吃</span>
+        <strong id="eatRate">-</strong>
+      </article>
+      <article class="metric-card">
+        <span>觉得准</span>
+        <strong id="accuracyRate">-</strong>
+      </article>
+      <article class="metric-card">
+        <span>流程轻松</span>
+        <strong id="flowRate">-</strong>
+      </article>
+    </section>
+
+    <section class="insight-grid">
+      <article class="insight-card">
+        <div class="section-heading">
+          <p class="eyebrow">选择意愿</p>
+          <h2>会不会吃</h2>
+        </div>
+        <div id="choiceChart" class="bar-list"></div>
+      </article>
+
+      <article class="insight-card">
+        <div class="section-heading">
+          <p class="eyebrow">推荐质量</p>
+          <h2>准不准</h2>
+        </div>
+        <div id="accuracyChart" class="bar-list"></div>
+      </article>
+
+      <article class="insight-card">
+        <div class="section-heading">
+          <p class="eyebrow">使用感受</p>
+          <h2>流程体验</h2>
+        </div>
+        <div id="flowChart" class="bar-list"></div>
+      </article>
+
+      <article class="insight-card">
+        <div class="section-heading">
+          <p class="eyebrow">热门结果</p>
+          <h2>被反馈最多</h2>
+        </div>
+        <div id="targetChart" class="bar-list"></div>
+      </article>
+    </section>
+
+    <section class="feedback-list-panel">
+      <div class="section-heading row-heading">
+        <div>
+          <p class="eyebrow">原始反馈</p>
+          <h2>朋友具体说了什么</h2>
+        </div>
+        <button id="copyCsvButton" class="ghost-button" type="button">复制表格</button>
+      </div>
+      <div id="feedbackList" class="feedback-list">
+        <p class="empty-state">还没有加载反馈。</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>
