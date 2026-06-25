@@ -878,3 +878,4 @@ function bindDishUploader() {
 
 $("#workspace").addEventListener("click", () => {});
 render();
+
