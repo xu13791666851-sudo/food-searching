@@ -50,13 +50,14 @@ export async function onRequestGet(context) {
 
     const restaurants = result.pois
       .filter((poi) => poi && poi.name)
+      .filter((poi) => isMealRestaurant(poi))
       .slice(0, 6)
       .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time }));
 
     if (!restaurants.length) {
       return json({
         ok: false,
-        message: "附近没有找到餐饮结果，可以换个位置或扩大范围。",
+        message: "附近没有找到合适的正餐餐厅，可以换个位置或扩大范围。",
         searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
       }, 404);
     }
@@ -141,22 +142,135 @@ function getPoiPhoto(poi) {
   return cleanText(photo.url, 300);
 }
 
+function isMealRestaurant(poi) {
+  const text = `${poi.name || ""} ${poi.type || ""}`.toLowerCase();
+  const snackOnlyWords = [
+    "咖啡",
+    "coffee",
+    "cafe",
+    "星巴克",
+    "瑞幸",
+    "manner",
+    "库迪",
+    "奶茶",
+    "饮品",
+    "茶饮",
+    "甜品",
+    "蛋糕",
+    "面包",
+    "糕饼",
+    "冷饮",
+    "冰淇淋",
+    "喜茶",
+    "奈雪",
+    "茶百道",
+    "霸王茶姬",
+    "蜜雪",
+  ];
+
+  return !snackOnlyWords.some((word) => text.includes(word));
+}
+
 function buildReason(poi, preference, minutes) {
-  const pieces = [];
-  if (preference.taste) pieces.push(`符合“${preference.taste}”这个口味方向`);
-  if (typeof minutes === "number") pieces.push(`距离近，步行大约 ${minutes} 分钟`);
-  if (poi.biz_ext && poi.biz_ext.rating && poi.biz_ext.rating !== "[]") {
-    pieces.push(`高德评分 ${poi.biz_ext.rating}`);
+  const profile = restaurantProfile(poi, preference, minutes);
+  const details = [];
+
+  if (profile.taste) details.push(profile.taste);
+  if (!profile.opening.includes("很近")) details.push(profile.distance);
+  if (profile.price) details.push(profile.price);
+  if (profile.rating) details.push(profile.rating);
+
+  return [profile.opening, ...details.filter(Boolean).slice(0, 3)].join("，") + "。";
+}
+
+function restaurantProfile(poi, preference, minutes) {
+  const category = restaurantCategory(poi);
+  const rating = ratingValue(poi);
+  const cost = costValue(poi);
+  const taste = tasteReason(poi, preference.taste);
+  const distance = distanceReason(minutes);
+  const price = priceReason(cost, preference.budget);
+  const opening = openingReason({ category, taste: preference.taste, minutes, rating });
+
+  return {
+    opening,
+    taste,
+    distance,
+    price,
+    rating: rating ? `高德评分 ${rating}，可以作为参考` : "",
+  };
+}
+
+function openingReason({ category, taste, minutes, rating }) {
+  if (typeof minutes === "number" && minutes <= 5) {
+    return category ? `这家${category}胜在很近` : "这家胜在很近";
   }
-  return pieces.length ? pieces.join("，") + "。" : "这是根据你当前位置找到的附近真实餐厅。";
+  if (rating && Number(rating) >= 4.5) {
+    return category ? `这家${category}评分不错` : "这家评分不错";
+  }
+  if (taste) {
+    return "它不是硬凑选项，先看距离和店铺类型都还算合适";
+  }
+  return category ? `这是一家附近的${category}` : "这是附近的一家真实餐厅";
+}
+
+function tasteReason(poi, taste) {
+  if (!taste) return "";
+  if (matchesTaste(poi, taste)) return `和“${taste}”比较接近`;
+  if (taste.includes("米饭")) return "不一定完全命中米饭类，但可以作为附近正餐备选";
+  if (taste.includes("面")) return "不一定完全命中面食，但可以作为附近正餐备选";
+  if (taste.includes("辣")) return "不一定完全命中辣味，但可以作为附近正餐备选";
+  return "口味不是强匹配，主要看位置和店铺类型还可以";
+}
+
+function distanceReason(minutes) {
+  if (typeof minutes !== "number") return "路程暂时不明确";
+  if (minutes <= 5) return `步行大约 ${minutes} 分钟，适合快速解决`;
+  if (minutes <= 12) return `步行大约 ${minutes} 分钟，还在可接受范围`;
+  return `步行大约 ${minutes} 分钟，适合不赶时间的时候`;
+}
+
+function priceReason(cost, budget) {
+  if (!cost) return "";
+  const price = Number(cost);
+  if (!Number.isFinite(price)) return "";
+  if (budget.includes("20 元内") && price > 25) return `人均约 ${price} 元，可能略超预算`;
+  if (budget.includes("20-40") && price >= 15 && price <= 45) return `人均约 ${price} 元，和预算比较贴近`;
+  if (budget.includes("40-60") && price >= 30 && price <= 70) return `人均约 ${price} 元，和预算比较贴近`;
+  return `人均约 ${price} 元`;
+}
+
+function ratingValue(poi) {
+  const rating = poi.biz_ext && poi.biz_ext.rating && poi.biz_ext.rating !== "[]" ? poi.biz_ext.rating : "";
+  return rating && Number.isFinite(Number(rating)) ? rating : "";
+}
+
+function costValue(poi) {
+  const cost = poi.biz_ext && poi.biz_ext.cost && poi.biz_ext.cost !== "[]" ? poi.biz_ext.cost : "";
+  return cost && Number.isFinite(Number(cost)) ? cost : "";
+}
+
+function restaurantCategory(poi) {
+  const parts = String(poi.type || "").split(";").filter(Boolean);
+  return parts[parts.length - 1] || "";
+}
+
+function matchesTaste(poi, taste) {
+  const text = `${poi.name || ""} ${poi.type || ""}`;
+  if (!taste) return false;
+  if (taste.includes("米饭")) return /饭|盖浇|简餐|快餐|中餐|黄焖|煲仔|便当|炒菜/.test(text);
+  if (taste.includes("面")) return /面|粉|馄饨|饺/.test(text);
+  if (taste.includes("辣")) return /川|湘|火锅|麻辣|冒菜|烤鱼/.test(text);
+  if (taste.includes("酸甜")) return /粤|本帮|江浙|茶餐厅/.test(text);
+  return false;
 }
 
 function keywordFromTaste(taste) {
   if (taste.includes("辣")) return "川菜 湘菜 火锅";
   if (taste.includes("面")) return "面馆 面食";
-  if (taste.includes("米饭")) return "简餐 盖饭";
+  if (taste.includes("米饭")) return "盖饭 炒饭 简餐 快餐";
   if (taste.includes("酸甜")) return "粤菜 本帮菜";
-  return "餐厅";
+  return "中餐 快餐 简餐";
 }
 
 function priceFromBudget(budget) {
