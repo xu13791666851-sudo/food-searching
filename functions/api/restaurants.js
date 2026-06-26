@@ -7,6 +7,7 @@ export async function onRequestGet(context) {
   const url = new URL(context.request.url);
   const lat = Number(url.searchParams.get("lat"));
   const lng = Number(url.searchParams.get("lng"));
+  const accuracy = Number(url.searchParams.get("accuracy") || 0);
   const taste = cleanText(url.searchParams.get("taste"), 40);
   const budget = cleanText(url.searchParams.get("budget"), 40);
   const time = cleanText(url.searchParams.get("time"), 40);
@@ -20,9 +21,10 @@ export async function onRequestGet(context) {
   }
 
   try {
+    const searchPoint = wgs84ToGcj02(lat, lng);
     const primary = await fetchAmapRestaurants(context.env.AMAP_KEY, {
-      lat,
-      lng,
+      lat: searchPoint.lat,
+      lng: searchPoint.lng,
       keyword: keywordFromTaste(taste),
       radius: "3000",
       offset: "10",
@@ -31,8 +33,8 @@ export async function onRequestGet(context) {
     const result = primary.pois.length
       ? primary
       : await fetchAmapRestaurants(context.env.AMAP_KEY, {
-          lat,
-          lng,
+          lat: searchPoint.lat,
+          lng: searchPoint.lng,
           keyword: "",
           radius: "10000",
           offset: "20",
@@ -55,7 +57,7 @@ export async function onRequestGet(context) {
       return json({
         ok: false,
         message: "附近没有找到餐饮结果，可以换个位置或扩大范围。",
-        searchedLocation: `${lng},${lat}`,
+        searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
       }, 404);
     }
 
@@ -63,7 +65,9 @@ export async function onRequestGet(context) {
       ok: true,
       source: "amap",
       restaurants,
-      searchedLocation: `${lng},${lat}`,
+      searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
+      originalLocation: `${lng},${lat}`,
+      accuracy: Number.isFinite(accuracy) ? accuracy : 0,
       radius: result.radius,
     });
   } catch (error) {
@@ -112,10 +116,12 @@ function formatRestaurant(poi, index, preference) {
   const rating = poi.biz_ext && poi.biz_ext.rating && poi.biz_ext.rating !== "[]" ? poi.biz_ext.rating : "";
   const cost = poi.biz_ext && poi.biz_ext.cost && poi.biz_ext.cost !== "[]" ? poi.biz_ext.cost : "";
   const type = String(poi.type || "餐饮").split(";").slice(-1)[0] || "餐饮";
+  const image = getPoiPhoto(poi);
 
   return {
     id: `amap-${poi.id || index}`,
     name: cleanText(poi.name, 60),
+    image,
     source: `附近 ${distance || "未知"}m · 高德真实餐厅`,
     tag: type.slice(0, 4),
     reason: buildReason(poi, preference, minutes),
@@ -127,6 +133,12 @@ function formatRestaurant(poi, index, preference) {
     address: cleanText(poi.address, 80),
     distance,
   };
+}
+
+function getPoiPhoto(poi) {
+  if (!Array.isArray(poi.photos) || !poi.photos.length) return "";
+  const photo = poi.photos.find((item) => item && item.url) || poi.photos[0];
+  return cleanText(photo.url, 300);
 }
 
 function buildReason(poi, preference, minutes) {
@@ -156,6 +168,44 @@ function priceFromBudget(budget) {
 
 function cleanText(value, maxLength) {
   return String(value || "").trim().slice(0, maxLength);
+}
+
+function wgs84ToGcj02(lat, lng) {
+  if (outOfChina(lat, lng)) return { lat, lng };
+
+  let dLat = transformLat(lng - 105.0, lat - 35.0);
+  let dLng = transformLng(lng - 105.0, lat - 35.0);
+  const radLat = (lat / 180.0) * Math.PI;
+  let magic = Math.sin(radLat);
+  magic = 1 - 0.00669342162296594323 * magic * magic;
+  const sqrtMagic = Math.sqrt(magic);
+  dLat = (dLat * 180.0) / (((6378245.0 * (1 - 0.00669342162296594323)) / (magic * sqrtMagic)) * Math.PI);
+  dLng = (dLng * 180.0) / ((6378245.0 / sqrtMagic) * Math.cos(radLat) * Math.PI);
+
+  return {
+    lat: lat + dLat,
+    lng: lng + dLng,
+  };
+}
+
+function outOfChina(lat, lng) {
+  return lng < 72.004 || lng > 137.8347 || lat < 0.8293 || lat > 55.8271;
+}
+
+function transformLat(x, y) {
+  let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+  ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  ret += ((20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin((y / 3.0) * Math.PI)) * 2.0) / 3.0;
+  ret += ((160.0 * Math.sin((y / 12.0) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30.0)) * 2.0) / 3.0;
+  return ret;
+}
+
+function transformLng(x, y) {
+  let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+  ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+  ret += ((20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin((x / 3.0) * Math.PI)) * 2.0) / 3.0;
+  ret += ((150.0 * Math.sin((x / 12.0) * Math.PI) + 300.0 * Math.sin((x / 30.0) * Math.PI)) * 2.0) / 3.0;
+  return ret;
 }
 
 function json(data, status = 200) {
