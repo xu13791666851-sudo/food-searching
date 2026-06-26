@@ -20,38 +20,90 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const amapUrl = new URL("https://restapi.amap.com/v3/place/around");
-    amapUrl.searchParams.set("key", context.env.AMAP_KEY);
-    amapUrl.searchParams.set("location", `${lng},${lat}`);
-    amapUrl.searchParams.set("keywords", keywordFromTaste(taste));
-    amapUrl.searchParams.set("types", "050000");
-    amapUrl.searchParams.set("radius", "3000");
-    amapUrl.searchParams.set("sortrule", "distance");
-    amapUrl.searchParams.set("offset", "10");
-    amapUrl.searchParams.set("page", "1");
-    amapUrl.searchParams.set("extensions", "all");
-    amapUrl.searchParams.set("output", "JSON");
+    const primary = await fetchAmapRestaurants(context.env.AMAP_KEY, {
+      lat,
+      lng,
+      keyword: keywordFromTaste(taste),
+      radius: "3000",
+      offset: "10",
+    });
 
-    const response = await fetch(amapUrl.toString());
-    const data = await response.json();
+    const result = primary.pois.length
+      ? primary
+      : await fetchAmapRestaurants(context.env.AMAP_KEY, {
+          lat,
+          lng,
+          keyword: "",
+          radius: "10000",
+          offset: "20",
+        });
 
-    if (data.status !== "1" || !Array.isArray(data.pois)) {
+    if (!result.ok) {
       return json({
         ok: false,
-        message: data.info || "Amap request failed.",
-        infocode: data.infocode || "",
+        message: result.message || "Amap request failed.",
+        infocode: result.infocode || "",
       }, 502);
     }
 
-    const restaurants = data.pois
+    const restaurants = result.pois
       .filter((poi) => poi && poi.name)
       .slice(0, 6)
       .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time }));
 
-    return json({ ok: true, source: "amap", restaurants });
+    if (!restaurants.length) {
+      return json({
+        ok: false,
+        message: "附近没有找到餐饮结果，可以换个位置或扩大范围。",
+        searchedLocation: `${lng},${lat}`,
+      }, 404);
+    }
+
+    return json({
+      ok: true,
+      source: "amap",
+      restaurants,
+      searchedLocation: `${lng},${lat}`,
+      radius: result.radius,
+    });
   } catch (error) {
     return json({ ok: false, message: "Restaurants could not be loaded." }, 500);
   }
+}
+
+async function fetchAmapRestaurants(key, options) {
+  const amapUrl = new URL("https://restapi.amap.com/v3/place/around");
+  amapUrl.searchParams.set("key", key);
+  amapUrl.searchParams.set("location", `${options.lng},${options.lat}`);
+  if (options.keyword) {
+    amapUrl.searchParams.set("keywords", options.keyword);
+  }
+  amapUrl.searchParams.set("types", "050000");
+  amapUrl.searchParams.set("radius", options.radius);
+  amapUrl.searchParams.set("sortrule", "distance");
+  amapUrl.searchParams.set("offset", options.offset);
+  amapUrl.searchParams.set("page", "1");
+  amapUrl.searchParams.set("extensions", "all");
+  amapUrl.searchParams.set("output", "JSON");
+
+  const response = await fetch(amapUrl.toString());
+  const data = await response.json();
+
+  if (data.status !== "1" || !Array.isArray(data.pois)) {
+    return {
+      ok: false,
+      pois: [],
+      message: data.info || "Amap request failed.",
+      infocode: data.infocode || "",
+      radius: options.radius,
+    };
+  }
+
+  return {
+    ok: true,
+    pois: data.pois,
+    radius: options.radius,
+  };
 }
 
 function formatRestaurant(poi, index, preference) {
