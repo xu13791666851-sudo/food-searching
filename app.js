@@ -506,7 +506,7 @@ function loadNearbyRestaurants() {
         liveEatOutFoods = data.restaurants.slice(0, 3);
         setState({
           selectedId: "",
-          restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅。`,
+          restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}。`,
         });
       } catch (error) {
         liveEatOutFoods = [];
