@@ -20,7 +20,7 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const amapUrl = new URL("https://restapi.amap.com/v5/place/around");
+    const amapUrl = new URL("https://restapi.amap.com/v3/place/around");
     amapUrl.searchParams.set("key", context.env.AMAP_KEY);
     amapUrl.searchParams.set("location", `${lng},${lat}`);
     amapUrl.searchParams.set("keywords", keywordFromTaste(taste));
@@ -30,12 +30,17 @@ export async function onRequestGet(context) {
     amapUrl.searchParams.set("offset", "10");
     amapUrl.searchParams.set("page", "1");
     amapUrl.searchParams.set("extensions", "all");
+    amapUrl.searchParams.set("output", "JSON");
 
     const response = await fetch(amapUrl.toString());
     const data = await response.json();
 
     if (data.status !== "1" || !Array.isArray(data.pois)) {
-      return json({ ok: false, message: data.info || "Amap request failed." }, 502);
+      return json({
+        ok: false,
+        message: data.info || "Amap request failed.",
+        infocode: data.infocode || "",
+      }, 502);
     }
 
     const restaurants = data.pois
