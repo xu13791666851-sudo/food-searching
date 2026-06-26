@@ -492,6 +492,7 @@ function loadNearbyRestaurants() {
         const params = new URLSearchParams({
           lat: String(position.coords.latitude),
           lng: String(position.coords.longitude),
+          accuracy: String(Math.round(position.coords.accuracy || 0)),
           taste: state.taste,
           budget: state.budget,
           time: state.time,
@@ -504,9 +505,11 @@ function loadNearbyRestaurants() {
         }
 
         liveEatOutFoods = data.restaurants.slice(0, 3);
+        const accuracy = Number(data.accuracy || 0);
+        const accuracyText = accuracy ? `，定位精度约 ${accuracy} 米` : "";
         setState({
           selectedId: "",
-          restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}。`,
+          restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}。`,
         });
       } catch (error) {
         liveEatOutFoods = [];
