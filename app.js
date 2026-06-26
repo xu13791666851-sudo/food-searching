@@ -500,7 +500,7 @@ function loadNearbyRestaurants() {
         const data = await response.json();
 
         if (!response.ok || !data.ok || !Array.isArray(data.restaurants) || !data.restaurants.length) {
-          throw new Error(data.message || "no restaurants");
+          throw new Error(data.message || "没有返回附近餐厅");
         }
 
         liveEatOutFoods = data.restaurants.slice(0, 3);
@@ -508,9 +508,9 @@ function loadNearbyRestaurants() {
           selectedId: "",
           restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅。`,
         });
-      } catch {
+      } catch (error) {
         liveEatOutFoods = [];
-        setState({ restaurantMessage: "真实餐厅暂时获取失败，先展示模拟推荐。" });
+        setState({ restaurantMessage: `真实餐厅暂时获取失败：${error.message}。先展示模拟推荐。` });
       }
     },
     () => {
@@ -878,4 +878,3 @@ function bindDishUploader() {
 
 $("#workspace").addEventListener("click", () => {});
 render();
-
