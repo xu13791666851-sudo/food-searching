@@ -11,6 +11,7 @@ export async function onRequestGet(context) {
   const taste = cleanText(url.searchParams.get("taste"), 40);
   const budget = cleanText(url.searchParams.get("budget"), 40);
   const time = cleanText(url.searchParams.get("time"), 40);
+  const note = cleanText(url.searchParams.get("note"), 200);
 
   if (!context.env.AMAP_KEY) {
     return json({ ok: false, message: "AMAP_KEY is not configured." }, 500);
@@ -52,7 +53,7 @@ export async function onRequestGet(context) {
       .filter((poi) => poi && poi.name)
       .filter((poi) => isMealRestaurant(poi))
       .slice(0, 6)
-      .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time }));
+      .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note }));
 
     if (!restaurants.length) {
       return json({
@@ -62,10 +63,13 @@ export async function onRequestGet(context) {
       }, 404);
     }
 
+    const aiResult = await applyAiRecommendation(context.env, restaurants, { taste, budget, time, note });
+
     return json({
       ok: true,
       source: "amap",
-      restaurants,
+      restaurants: aiResult.restaurants,
+      ai: aiResult.used,
       searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
       originalLocation: `${lng},${lat}`,
       accuracy: Number.isFinite(accuracy) ? accuracy : 0,
@@ -109,6 +113,133 @@ async function fetchAmapRestaurants(key, options) {
     pois: data.pois,
     radius: options.radius,
   };
+}
+
+async function applyAiRecommendation(env, restaurants, preference) {
+  if ((!env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) || !restaurants.length) {
+    return { used: false, restaurants };
+  }
+
+  try {
+    const text = env.DEEPSEEK_API_KEY
+      ? await callDeepSeek(env, restaurants, preference)
+      : await callOpenAI(env, restaurants, preference);
+    const parsed = parseJsonObject(text);
+    const picks = Array.isArray(parsed.picks) ? parsed.picks : [];
+    const byId = new Map(restaurants.map((item) => [item.id, item]));
+    const selected = [];
+
+    for (const pick of picks) {
+      const item = byId.get(pick.id);
+      if (!item || selected.some((existing) => existing.id === item.id)) continue;
+      selected.push({
+        ...item,
+        reason: cleanText(pick.reason, 120) || item.reason,
+      });
+    }
+
+    const ordered = [
+      ...selected,
+      ...restaurants.filter((item) => !selected.some((selectedItem) => selectedItem.id === item.id)),
+    ];
+
+    return { used: selected.length > 0, restaurants: ordered };
+  } catch {
+    return { used: false, restaurants };
+  }
+}
+
+async function callDeepSeek(env, restaurants, preference) {
+  const response = await fetch("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+      messages: buildAiMessages(restaurants, preference),
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) return "";
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
+async function callOpenAI(env, restaurants, preference) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: env.OPENAI_MODEL || "gpt-4.1-mini",
+      input: buildAiMessages(restaurants, preference),
+    }),
+  });
+
+  if (!response.ok) return "";
+  const data = await response.json();
+  return extractResponseText(data);
+}
+
+function buildAiMessages(restaurants, preference) {
+  return [
+    {
+      role: "system",
+      content:
+        "你是一个懂吃饭决策的中文助手。你只能从给定餐厅列表里选择和排序，不能编造餐厅、距离、价格、评分。理由要像朋友建议一样自然，但必须基于给定事实。如果餐厅和用户偏好不是强匹配，要诚实说明。",
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        task: "请从候选餐厅里选出最适合今天的 3 家，并给出简短推荐理由。只返回 JSON，不要 Markdown。",
+        output_format: {
+          picks: [
+            {
+              id: "餐厅 id，必须来自候选列表",
+              reason: "80 字以内中文理由，基于事实，不夸大",
+            },
+          ],
+        },
+        preference,
+        candidates: restaurants.map((item) => ({
+          id: item.id,
+          name: item.name,
+          category: item.tag,
+          source: item.source,
+          price: item.price,
+          time: item.time,
+          rating: item.health,
+          address: item.address,
+          currentReason: item.reason,
+        })),
+      }),
+    },
+  ];
+}
+
+function extractResponseText(data) {
+  if (typeof data.output_text === "string") return data.output_text;
+  if (!Array.isArray(data.output)) return "";
+
+  return data.output
+    .flatMap((item) => (Array.isArray(item.content) ? item.content : []))
+    .map((content) => content.text || "")
+    .join("\n")
+    .trim();
+}
+
+function parseJsonObject(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const match = text.match(/\{[\s\S]*\}/);
+    return match ? JSON.parse(match[0]) : {};
+  }
 }
 
 function formatRestaurant(poi, index, preference) {
