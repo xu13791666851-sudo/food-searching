@@ -70,6 +70,7 @@ export async function onRequestGet(context) {
       source: "amap",
       restaurants: aiResult.restaurants,
       ai: aiResult.used,
+      aiStatus: aiResult.status,
       searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
       originalLocation: `${lng},${lat}`,
       accuracy: Number.isFinite(accuracy) ? accuracy : 0,
@@ -116,14 +117,23 @@ async function fetchAmapRestaurants(key, options) {
 }
 
 async function applyAiRecommendation(env, restaurants, preference) {
-  if ((!env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) || !restaurants.length) {
-    return { used: false, restaurants };
+  if (!restaurants.length) {
+    return { used: false, status: "no-restaurants", restaurants };
+  }
+
+  if (!env.DEEPSEEK_API_KEY && !env.OPENAI_API_KEY) {
+    return { used: false, status: "missing-ai-key", restaurants };
   }
 
   try {
-    const text = env.DEEPSEEK_API_KEY
+    const aiResponse = env.DEEPSEEK_API_KEY
       ? await callDeepSeek(env, restaurants, preference)
       : await callOpenAI(env, restaurants, preference);
+    if (!aiResponse.ok) {
+      return { used: false, status: aiResponse.status, restaurants };
+    }
+
+    const text = aiResponse.text;
     const parsed = parseJsonObject(text);
     const picks = Array.isArray(parsed.picks) ? parsed.picks : [];
     const byId = new Map(restaurants.map((item) => [item.id, item]));
@@ -143,9 +153,13 @@ async function applyAiRecommendation(env, restaurants, preference) {
       ...restaurants.filter((item) => !selected.some((selectedItem) => selectedItem.id === item.id)),
     ];
 
-    return { used: selected.length > 0, restaurants: ordered };
-  } catch {
-    return { used: false, restaurants };
+    return {
+      used: selected.length > 0,
+      status: selected.length > 0 ? "ok" : "no-valid-picks",
+      restaurants: ordered,
+    };
+  } catch (error) {
+    return { used: false, status: "ai-error", restaurants };
   }
 }
 
@@ -163,9 +177,9 @@ async function callDeepSeek(env, restaurants, preference) {
     }),
   });
 
-  if (!response.ok) return "";
+  if (!response.ok) return { ok: false, status: `deepseek-http-${response.status}`, text: "" };
   const data = await response.json();
-  return data.choices?.[0]?.message?.content || "";
+  return { ok: true, status: "ok", text: data.choices?.[0]?.message?.content || "" };
 }
 
 async function callOpenAI(env, restaurants, preference) {
@@ -181,9 +195,9 @@ async function callOpenAI(env, restaurants, preference) {
     }),
   });
 
-  if (!response.ok) return "";
+  if (!response.ok) return { ok: false, status: `openai-http-${response.status}`, text: "" };
   const data = await response.json();
-  return extractResponseText(data);
+  return { ok: true, status: "ok", text: extractResponseText(data) };
 }
 
 function buildAiMessages(restaurants, preference) {
