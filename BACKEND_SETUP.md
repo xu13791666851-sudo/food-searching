@@ -81,3 +81,51 @@ AMAP_KEY
 变量值填写你在高德开放平台创建的 `Web服务` Key。
 
 保存后重新部署，用户在“外面吃”流程里授权定位后，页面会优先展示附近真实餐厅。如果用户拒绝定位，或者高德接口暂时失败，页面会自动回退到模拟推荐，不会影响试用。
+
+## 初步 AI 推荐
+
+现在可以让 AI 参与“外面吃”的真实餐厅排序和推荐理由。
+
+推荐优先使用 DeepSeek。需要在 Cloudflare Pages 项目里添加环境变量：
+
+```text
+DEEPSEEK_API_KEY
+```
+
+变量值填写你的 DeepSeek API Key。
+
+可选添加：
+
+```text
+DEEPSEEK_MODEL
+```
+
+如果不填，默认使用：
+
+```text
+deepseek-v4-flash
+```
+
+如果你想改用 OpenAI，也可以添加：
+
+```text
+OPENAI_API_KEY
+```
+
+变量值填写你的 OpenAI API Key。
+
+可选添加：
+
+```text
+OPENAI_MODEL
+```
+
+如果不填，默认使用：
+
+```text
+gpt-4.1-mini
+```
+
+如果同时配置了 DeepSeek 和 OpenAI，会优先使用 DeepSeek。
+
+保存后重新部署。没有配置 AI Key 时，页面会继续使用原来的规则推荐，不会影响朋友试用。
