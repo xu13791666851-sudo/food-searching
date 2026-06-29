@@ -7,6 +7,7 @@ const state = {
   budget: "",
   time: "",
   health: "",
+  aiNote: "",
   selectedId: "",
   editingDishId: "",
   feedbackMessage: "",
@@ -248,6 +249,7 @@ function reset() {
     budget: "",
     time: "",
     health: "",
+    aiNote: "",
     selectedId: "",
     editingDishId: "",
     feedbackMessage: "",
@@ -424,6 +426,10 @@ function renderPreference() {
       ${quickSelect("time", isOut ? "路程/等餐" : "做饭时间", times)}
       ${quickSelect("health", "健康程度", healthOptions)}
     </div>
+    <div class="simple-block">
+      <h3>还有什么想补充？</h3>
+      <textarea class="ai-note-input" id="aiNoteInput" rows="3" placeholder="比如：今天很累，不想走太远，想吃饱但别太油">${escapeHtml(state.aiNote)}</textarea>
+    </div>
     <div class="action-row sticky-actions">
       <button class="secondary-button" type="button" id="backBtn">上一步</button>
       <button class="primary-button" type="button" id="nextBtn">看推荐</button>
@@ -445,6 +451,7 @@ function renderPreference() {
       budget: state.budget || "20-40 元",
       time: state.time || "30 分钟内",
       health: state.health || "随意一点",
+      aiNote: $("#aiNoteInput") ? $("#aiNoteInput").value.trim() : "",
       restaurantMessage: state.mode === "out" ? "正在获取你附近的真实餐厅..." : "",
       step: 4,
     });
@@ -496,6 +503,7 @@ function loadNearbyRestaurants() {
           taste: state.taste,
           budget: state.budget,
           time: state.time,
+          note: state.aiNote,
         });
         const response = await fetch(`/api/restaurants?${params.toString()}`);
         const data = await response.json();
@@ -509,7 +517,7 @@ function loadNearbyRestaurants() {
         const accuracyText = accuracy ? `，定位精度约 ${accuracy} 米` : "";
         setState({
           selectedId: "",
-          restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}。`,
+          restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你重新排序" : ""}。`,
         });
       } catch (error) {
         liveEatOutFoods = [];
