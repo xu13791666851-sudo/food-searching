@@ -49,9 +49,12 @@ export async function onRequestGet(context) {
       }, 502);
     }
 
-    const restaurants = result.pois
+    const mealCandidates = result.pois
       .filter((poi) => poi && poi.name)
-      .filter((poi) => isMealRestaurant(poi))
+      .filter((poi) => isMealRestaurant(poi));
+    const budgetCandidates = mealCandidates.filter((poi) => isBudgetReasonable(poi, budget));
+    const candidatePois = budgetCandidates.length >= 3 ? budgetCandidates : mealCandidates;
+    const restaurants = candidatePois
       .slice(0, 6)
       .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note }));
 
@@ -293,6 +296,11 @@ function isMealRestaurant(poi) {
     "咖啡",
     "coffee",
     "cafe",
+    "bakery",
+    "dessert",
+    "pastry",
+    "cake",
+    "tea",
     "星巴克",
     "瑞幸",
     "manner",
@@ -303,7 +311,14 @@ function isMealRestaurant(poi) {
     "甜品",
     "蛋糕",
     "面包",
+    "糕点",
     "糕饼",
+    "点心",
+    "烘焙",
+    "饼屋",
+    "食品店",
+    "稻香村",
+    "杏花楼",
     "冷饮",
     "冰淇淋",
     "喜茶",
@@ -314,6 +329,15 @@ function isMealRestaurant(poi) {
   ];
 
   return !snackOnlyWords.some((word) => text.includes(word));
+}
+
+function isBudgetReasonable(poi, budget) {
+  const cost = Number(costValue(poi));
+  if (!Number.isFinite(cost) || cost <= 0) return true;
+  if (budget.includes("20 元内")) return cost <= 35;
+  if (budget.includes("20-40")) return cost <= 70;
+  if (budget.includes("40-60")) return cost <= 110;
+  return true;
 }
 
 function buildReason(poi, preference, minutes) {
