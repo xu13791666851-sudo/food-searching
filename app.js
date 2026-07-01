@@ -8,6 +8,8 @@ const state = {
   time: "",
   health: "",
   aiNote: "",
+  refineOpen: false,
+  refineReason: "",
   selectedId: "",
   editingDishId: "",
   feedbackMessage: "",
@@ -250,6 +252,8 @@ function reset() {
     time: "",
     health: "",
     aiNote: "",
+    refineOpen: false,
+    refineReason: "",
     selectedId: "",
     editingDishId: "",
     feedbackMessage: "",
@@ -452,6 +456,8 @@ function renderPreference() {
       time: state.time || "30 分钟内",
       health: state.health || "随意一点",
       aiNote: $("#aiNoteInput") ? $("#aiNoteInput").value.trim() : "",
+      refineOpen: false,
+      refineReason: "",
       restaurantMessage: state.mode === "out" ? "正在获取你附近的真实餐厅..." : "",
       step: 4,
     });
@@ -504,6 +510,7 @@ function loadNearbyRestaurants() {
           budget: state.budget,
           time: state.time,
           note: state.aiNote,
+          refine: state.refineReason,
         });
         const response = await fetch(`/api/restaurants?${params.toString()}`);
         const data = await response.json();
@@ -559,8 +566,10 @@ function renderResult() {
       <div class="action-row">
         <button class="secondary-button" type="button" id="restartInline">重新选</button>
         <button class="primary-button" type="button" id="shuffleBtn">换一个最终答案</button>
+        ${state.mode === "out" ? `<button class="secondary-button" type="button" id="refineBtn">都不太想吃</button>` : ""}
       </div>
     </section>
+    ${state.mode === "out" && state.refineOpen ? refinePanel() : ""}
     ${feedbackPanel(`${state.mode === "out" ? "外面吃" : "在家推荐"}：${selected.name}`)}
   `;
   document.querySelectorAll("[data-select]").forEach((button) => {
@@ -572,7 +581,37 @@ function renderResult() {
     const next = list[(currentIndex + 1) % list.length];
     setState({ selectedId: next.id });
   });
+  const refineButton = $("#refineBtn");
+  if (refineButton) {
+    refineButton.addEventListener("click", () => setState({ refineOpen: true }));
+  }
+  document.querySelectorAll("[data-refine-reason]").forEach((button) => {
+    button.addEventListener("click", () => {
+      liveEatOutFoods = [];
+      setState({
+        selectedId: "",
+        refineReason: button.dataset.refineReason,
+        restaurantMessage: `收到：${button.dataset.refineReason}。我让 AI 重新筛一轮...`,
+      });
+      loadNearbyRestaurants();
+    });
+  });
   bindFeedback();
+}
+
+function refinePanel() {
+  const reasons = ["太贵", "太远", "不像正餐", "不想吃这个口味", "换轻一点"];
+  return `
+    <section class="refine-panel simple-block">
+      <h3>哪里不对？</h3>
+      <p class="muted-line">点一个原因，我会带着这个原因重新筛选。</p>
+      <div class="refine-options">
+        ${reasons
+          .map((reason) => `<button class="mini-chip ${selectedClass(reason, state.refineReason)}" type="button" data-refine-reason="${reason}">${reason}</button>`)
+          .join("")}
+      </div>
+    </section>
+  `;
 }
 
 function candidateCard(item) {
