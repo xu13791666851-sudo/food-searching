@@ -277,6 +277,7 @@ function render() {
   if (state.step === 2 && state.mode === "out") return renderPreference();
   if (state.step === 3) return renderPreference();
   if (state.step === 6) return renderLoading();
+  if (state.step === 7) return renderLocationHelp();
   if (state.step === 5) return renderSavedDishList();
   return renderResult();
 }
@@ -500,61 +501,84 @@ function getList() {
   return state.homeSource === "saved" ? getSavedDishList() : homeFoods;
 }
 
-function loadNearbyRestaurants() {
+function loadNearbyRestaurants(options = {}) {
+  if (options.useTestLocation) {
+    fetchNearbyRestaurants(
+      { latitude: 31.22845773757727, longitude: 121.47822305927693, accuracy: 0 },
+      { testLocation: true }
+    );
+    return;
+  }
+
   if (!navigator.geolocation) {
-    setState({ restaurantMessage: "当前浏览器不支持定位，先展示模拟推荐。" });
+    showLocationHelp("当前浏览器不支持定位。可以先用测试位置体验真实餐厅推荐。");
     return;
   }
 
   navigator.geolocation.getCurrentPosition(
-    async (position) => {
-      try {
-        const params = new URLSearchParams({
-          lat: String(position.coords.latitude),
-          lng: String(position.coords.longitude),
-          accuracy: String(Math.round(position.coords.accuracy || 0)),
-          taste: state.taste,
-          budget: state.budget,
-          time: state.time,
-          note: state.aiNote,
-          refine: state.refineReason,
-        });
-        const response = await fetch(`/api/restaurants?${params.toString()}`);
-        const data = await response.json();
-
-        if (!response.ok || !data.ok || !Array.isArray(data.restaurants) || !data.restaurants.length) {
-          throw new Error(data.message || "没有返回附近餐厅");
-        }
-
-        liveEatOutFoods = data.restaurants.slice(0, 3);
-        const accuracy = Number(data.accuracy || 0);
-        const accuracyText = accuracy ? `，定位精度约 ${accuracy} 米` : "";
-        setState({
-          selectedId: "",
-          restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你重新排序" : ""}。`,
-          step: 4,
-        });
-      } catch (error) {
-        liveEatOutFoods = [];
-        setState({
-          restaurantMessage: `真实餐厅暂时获取失败：${error.message}。先展示模拟推荐。`,
-          step: 4,
-        });
-      }
-    },
-    () => {
-      liveEatOutFoods = [];
-      setState({
-        restaurantMessage: "没有获得定位授权，先展示模拟推荐。",
-        step: 4,
-      });
-    },
+    (position) => fetchNearbyRestaurants(position.coords),
+    (error) => showLocationHelp(getLocationMessage(error)),
     {
-      enableHighAccuracy: false,
-      timeout: 8000,
-      maximumAge: 300000,
+      enableHighAccuracy: true,
+      timeout: 12000,
+      maximumAge: 120000,
     }
   );
+}
+
+async function fetchNearbyRestaurants(coords, options = {}) {
+  try {
+    const params = new URLSearchParams({
+      lat: String(coords.latitude),
+      lng: String(coords.longitude),
+      accuracy: String(Math.round(coords.accuracy || 0)),
+      taste: state.taste,
+      budget: state.budget,
+      time: state.time,
+      note: state.aiNote,
+      refine: state.refineReason,
+    });
+    const response = await fetch(`/api/restaurants?${params.toString()}`);
+    const data = await response.json();
+
+    if (!response.ok || !data.ok || !Array.isArray(data.restaurants) || !data.restaurants.length) {
+      throw new Error(data.message || "没有返回附近餐厅");
+    }
+
+    liveEatOutFoods = data.restaurants.slice(0, 3);
+    const accuracy = Number(data.accuracy || 0);
+    const accuracyText = accuracy ? `，定位精度约 ${accuracy} 米` : "";
+    const placeText = options.testLocation ? "测试位置附近" : "你附近的位置";
+    setState({
+      selectedId: "",
+      restaurantMessage: `已根据${placeText}找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你重新排序" : ""}。`,
+      step: 4,
+    });
+  } catch (error) {
+    liveEatOutFoods = [];
+    setState({
+      restaurantMessage: `真实餐厅暂时获取失败：${error.message}。先展示模拟推荐。`,
+      step: 4,
+    });
+  }
+}
+
+function showLocationHelp(message) {
+  liveEatOutFoods = [];
+  setState({
+    restaurantMessage: message,
+    step: 7,
+  });
+}
+
+function getLocationMessage(error) {
+  if (error && error.code === 1) {
+    return "还没有拿到定位授权，所以暂时不能按你身边的餐厅推荐。";
+  }
+  if (error && error.code === 3) {
+    return "这次定位等待太久了，可以重新试一次。";
+  }
+  return "这次没有拿到当前位置，可以重新定位或先用测试位置体验。";
 }
 
 function renderLoading() {
@@ -576,6 +600,47 @@ function renderLoading() {
       </div>
     </section>
   `;
+}
+
+function renderLocationHelp() {
+  updateShell("result");
+  $("#workspace").innerHTML = `
+    <section class="location-panel">
+      <p class="eyebrow">需要定位</p>
+      <h2>我还不知道你在哪里</h2>
+      <p class="muted-line">${state.restaurantMessage || "开启定位后，我才能按附近真实餐厅帮你筛。"}</p>
+      <div class="location-actions">
+        <button class="primary-button" type="button" id="retryLocationBtn">重新获取定位</button>
+        <button class="secondary-button" type="button" id="testLocationBtn">用测试位置体验</button>
+        <button class="secondary-button" type="button" id="mockLocationBtn">先看模拟推荐</button>
+      </div>
+    </section>
+  `;
+  $("#retryLocationBtn").addEventListener("click", () => {
+    setState({
+      restaurantMessage: "",
+      loadingTitle: "正在重新获取定位",
+      loadingDetail: "如果浏览器弹出定位提醒，请选择允许。",
+      step: 6,
+    });
+    loadNearbyRestaurants();
+  });
+  $("#testLocationBtn").addEventListener("click", () => {
+    setState({
+      restaurantMessage: "",
+      loadingTitle: "正在用测试位置找餐厅",
+      loadingDetail: "先用一个固定位置跑完整个真实餐厅流程。",
+      step: 6,
+    });
+    loadNearbyRestaurants({ useTestLocation: true });
+  });
+  $("#mockLocationBtn").addEventListener("click", () => {
+    liveEatOutFoods = [];
+    setState({
+      restaurantMessage: "已切换为模拟推荐。",
+      step: 4,
+    });
+  });
 }
 
 function renderResult() {
