@@ -729,7 +729,8 @@ p {
   gap: 8px;
 }
 
-.loading-panel {
+.loading-panel,
+.location-panel {
   min-height: 360px;
   display: grid;
   align-content: center;
@@ -743,11 +744,17 @@ p {
   box-shadow: 5px 5px 0 #17130f;
 }
 
-.loading-panel h2 {
+.loading-panel h2,
+.location-panel h2 {
   margin: 0;
   color: var(--text);
   font-size: 32px;
   line-height: 1.12;
+}
+
+.location-actions {
+  display: grid;
+  gap: 10px;
 }
 
 .search-pulse {
@@ -1350,4 +1357,3 @@ figure {
     font-size: 52px;
   }
 }
-
