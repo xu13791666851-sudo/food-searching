@@ -10,6 +10,8 @@ const state = {
   aiNote: "",
   refineOpen: false,
   refineReason: "",
+  loadingTitle: "",
+  loadingDetail: "",
   selectedId: "",
   editingDishId: "",
   feedbackMessage: "",
@@ -254,6 +256,8 @@ function reset() {
     aiNote: "",
     refineOpen: false,
     refineReason: "",
+    loadingTitle: "",
+    loadingDetail: "",
     selectedId: "",
     editingDishId: "",
     feedbackMessage: "",
@@ -272,6 +276,7 @@ function render() {
   if (state.step === 2 && state.mode === "home") return renderHomeSource();
   if (state.step === 2 && state.mode === "out") return renderPreference();
   if (state.step === 3) return renderPreference();
+  if (state.step === 6) return renderLoading();
   if (state.step === 5) return renderSavedDishList();
   return renderResult();
 }
@@ -458,8 +463,10 @@ function renderPreference() {
       aiNote: $("#aiNoteInput") ? $("#aiNoteInput").value.trim() : "",
       refineOpen: false,
       refineReason: "",
-      restaurantMessage: state.mode === "out" ? "正在获取你附近的真实餐厅..." : "",
-      step: 4,
+      restaurantMessage: "",
+      loadingTitle: state.mode === "out" ? "正在帮你找附近正餐" : "",
+      loadingDetail: state.mode === "out" ? "先看真实餐厅，再让 AI 帮你缩小选择。" : "",
+      step: state.mode === "out" ? 6 : 4,
     });
     if (state.mode === "out") {
       loadNearbyRestaurants();
@@ -525,15 +532,22 @@ function loadNearbyRestaurants() {
         setState({
           selectedId: "",
           restaurantMessage: `已根据你附近的位置找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你重新排序" : ""}。`,
+          step: 4,
         });
       } catch (error) {
         liveEatOutFoods = [];
-        setState({ restaurantMessage: `真实餐厅暂时获取失败：${error.message}。先展示模拟推荐。` });
+        setState({
+          restaurantMessage: `真实餐厅暂时获取失败：${error.message}。先展示模拟推荐。`,
+          step: 4,
+        });
       }
     },
     () => {
       liveEatOutFoods = [];
-      setState({ restaurantMessage: "没有获得定位授权，先展示模拟推荐。" });
+      setState({
+        restaurantMessage: "没有获得定位授权，先展示模拟推荐。",
+        step: 4,
+      });
     },
     {
       enableHighAccuracy: false,
@@ -541,6 +555,27 @@ function loadNearbyRestaurants() {
       maximumAge: 300000,
     }
   );
+}
+
+function renderLoading() {
+  updateShell("result");
+  $("#workspace").innerHTML = `
+    <section class="loading-panel">
+      <p class="eyebrow">正在寻找</p>
+      <h2>${state.loadingTitle || "正在帮你找"}</h2>
+      <p class="muted-line">${state.loadingDetail || "我会先看真实数据，再帮你做决定。"}</p>
+      <div class="search-pulse" aria-hidden="true">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <div class="search-steps">
+        <span>读取附近餐厅</span>
+        <span>排除不合适的店</span>
+        <span>AI 帮你重新排序</span>
+      </div>
+    </section>
+  `;
 }
 
 function renderResult() {
@@ -591,7 +626,10 @@ function renderResult() {
       setState({
         selectedId: "",
         refineReason: button.dataset.refineReason,
-        restaurantMessage: `收到：${button.dataset.refineReason}。我让 AI 重新筛一轮...`,
+        restaurantMessage: "",
+        loadingTitle: "正在重新帮你筛一轮",
+        loadingDetail: `收到：${button.dataset.refineReason}。这次会优先避开这个问题。`,
+        step: 6,
       });
       loadNearbyRestaurants();
     });
