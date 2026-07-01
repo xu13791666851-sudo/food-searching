@@ -12,6 +12,7 @@ export async function onRequestGet(context) {
   const budget = cleanText(url.searchParams.get("budget"), 40);
   const time = cleanText(url.searchParams.get("time"), 40);
   const note = cleanText(url.searchParams.get("note"), 200);
+  const refine = cleanText(url.searchParams.get("refine"), 60);
 
   if (!context.env.AMAP_KEY) {
     return json({ ok: false, message: "AMAP_KEY is not configured." }, 500);
@@ -26,7 +27,7 @@ export async function onRequestGet(context) {
     const primary = await fetchAmapRestaurants(context.env.AMAP_KEY, {
       lat: searchPoint.lat,
       lng: searchPoint.lng,
-      keyword: keywordFromTaste(taste),
+      keyword: refine.includes("不想吃这个口味") ? "" : keywordFromTaste(taste),
       radius: "3000",
       offset: "10",
     });
@@ -52,11 +53,12 @@ export async function onRequestGet(context) {
     const mealCandidates = result.pois
       .filter((poi) => poi && poi.name)
       .filter((poi) => isMealRestaurant(poi));
-    const budgetCandidates = mealCandidates.filter((poi) => isBudgetReasonable(poi, budget));
-    const candidatePois = budgetCandidates.length >= 3 ? budgetCandidates : mealCandidates;
+    const refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, refine, budget));
+    const budgetCandidates = refinedCandidates.filter((poi) => isBudgetReasonable(poi, budget, refine));
+    const candidatePois = budgetCandidates.length >= 3 ? budgetCandidates : refinedCandidates.length >= 3 ? refinedCandidates : mealCandidates;
     const restaurants = candidatePois
       .slice(0, 6)
-      .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note }));
+      .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note, refine }));
 
     if (!restaurants.length) {
       return json({
@@ -66,7 +68,7 @@ export async function onRequestGet(context) {
       }, 404);
     }
 
-    const aiResult = await applyAiRecommendation(context.env, restaurants, { taste, budget, time, note });
+    const aiResult = await applyAiRecommendation(context.env, restaurants, { taste, budget, time, note, refine });
 
     return json({
       ok: true,
@@ -213,8 +215,11 @@ function buildAiMessages(restaurants, preference) {
     {
       role: "user",
       content: JSON.stringify({
-        task: "请从候选餐厅里选出最适合今天的 3 家，并给出简短推荐理由。只返回 JSON，不要 Markdown。",
-        output_format: {
+              task: "请从候选餐厅里选出最适合今天的 3 家，并给出简短推荐理由。只返回 JSON，不要 Markdown。",
+              refinement_rule: preference.refine
+                ? `用户刚才不满意的原因是：${preference.refine}。这次必须优先避开这个问题。`
+                : "这是第一次推荐，按用户偏好和真实餐厅事实排序。",
+              output_format: {
           picks: [
             {
               id: "餐厅 id，必须来自候选列表",
@@ -331,13 +336,35 @@ function isMealRestaurant(poi) {
   return !snackOnlyWords.some((word) => text.includes(word));
 }
 
-function isBudgetReasonable(poi, budget) {
+function isRefineReasonable(poi, refine, budget) {
+  const cost = Number(costValue(poi));
+  const distance = Number(poi.distance || 0);
+  const text = `${poi.name || ""} ${poi.type || ""}`;
+
+  if (refine.includes("太贵") && Number.isFinite(cost) && cost > budgetMax(budget)) return false;
+  if (refine.includes("太远") && Number.isFinite(distance) && distance > 1200) return false;
+  if (refine.includes("不像正餐") && !/中餐|快餐|简餐|饭|面|粉|火锅|烧烤|烤肉|日料|日本料理|韩国料理|小吃|餐厅|酒楼/.test(text)) return false;
+  if (refine.includes("换轻一点") && /火锅|烧烤|烤肉|炸|麻辣|重慶|重庆|川菜|湘菜|冒菜|烤鱼/.test(text)) return false;
+
+  return true;
+}
+
+function isBudgetReasonable(poi, budget, refine = "") {
   const cost = Number(costValue(poi));
   if (!Number.isFinite(cost) || cost <= 0) return true;
+  const max = budgetMax(budget);
+  if (refine.includes("太贵")) return cost <= max;
   if (budget.includes("20 元内")) return cost <= 35;
   if (budget.includes("20-40")) return cost <= 70;
   if (budget.includes("40-60")) return cost <= 110;
   return true;
+}
+
+function budgetMax(budget) {
+  if (budget.includes("20 元内")) return 25;
+  if (budget.includes("20-40")) return 45;
+  if (budget.includes("40-60")) return 70;
+  return 80;
 }
 
 function buildReason(poi, preference, minutes) {
