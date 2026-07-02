@@ -13,6 +13,7 @@ export async function onRequestGet(context) {
   const time = cleanText(url.searchParams.get("time"), 40);
   const note = cleanText(url.searchParams.get("note"), 200);
   const refine = cleanText(url.searchParams.get("refine"), 60);
+  const batch = Math.max(0, Math.min(5, Number(url.searchParams.get("batch") || 0)));
 
   if (!context.env.AMAP_KEY) {
     return json({ ok: false, message: "AMAP_KEY is not configured." }, 500);
@@ -30,6 +31,7 @@ export async function onRequestGet(context) {
       keyword: refine.includes("不想吃这个口味") ? "" : keywordFromTaste(taste),
       radius: "3000",
       offset: "10",
+      page: String((batch % 3) + 1),
     });
 
     const result = primary.pois.length
@@ -40,6 +42,7 @@ export async function onRequestGet(context) {
           keyword: "",
           radius: "10000",
           offset: "20",
+          page: String((batch % 3) + 1),
         });
 
     if (!result.ok) {
@@ -97,7 +100,7 @@ async function fetchAmapRestaurants(key, options) {
   amapUrl.searchParams.set("radius", options.radius);
   amapUrl.searchParams.set("sortrule", "distance");
   amapUrl.searchParams.set("offset", options.offset);
-  amapUrl.searchParams.set("page", "1");
+  amapUrl.searchParams.set("page", options.page || "1");
   amapUrl.searchParams.set("extensions", "all");
   amapUrl.searchParams.set("output", "JSON");
 
