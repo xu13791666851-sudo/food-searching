@@ -173,6 +173,10 @@ h2 {
   line-height: 1;
 }
 
+.usage-card {
+  background: #fff4ca;
+}
+
 .insight-grid {
   display: grid;
   gap: 16px;
