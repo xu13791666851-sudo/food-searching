@@ -1064,6 +1064,25 @@ figure {
   font-size: 35px;
 }
 
+.hero .hero-title {
+  display: grid;
+  gap: 2px;
+  margin-top: 34px;
+  margin-bottom: 14px;
+  max-width: 100%;
+  font-size: 42px;
+  line-height: 0.98;
+}
+
+.hero .hero-title span {
+  display: block;
+}
+
+.hero .hero-title span:nth-child(2) {
+  color: var(--tomato);
+  text-shadow: 2px 2px 0 #ffd36d;
+}
+
 .progress-track {
   border: 2px solid var(--line);
   background: #fff8df;
@@ -1247,6 +1266,12 @@ figure {
     margin-top: 36px;
   }
 
+  .hero .hero-title {
+    font-size: 44px;
+    line-height: 0.98;
+    margin-top: 42px;
+  }
+
   .brand-row strong {
     font-size: 30px;
   }
@@ -1355,5 +1380,9 @@ figure {
 
   .hero h1 {
     font-size: 52px;
+  }
+
+  .hero .hero-title {
+    font-size: 48px;
   }
 }
