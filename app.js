@@ -23,12 +23,14 @@ const SAVED_DISH_KEY = "food-helper-saved-dishes";
 const DISH_OVERRIDES_KEY = "food-helper-dish-overrides";
 const HIDDEN_DISH_KEY = "food-helper-hidden-dishes";
 const FEEDBACK_KEY = "food-helper-feedback";
+const SESSION_KEY = "food-helper-session-id";
 let uploadedDishes = loadUploadedDishes();
 let dishOverrides = loadJson(DISH_OVERRIDES_KEY, {});
 let hiddenDishIds = loadJson(HIDDEN_DISH_KEY, []);
 let pendingDishImage = "";
 let liveHomeFoods = [];
 let liveEatOutFoods = [];
+let sessionId = getSessionId();
 
 const stepCopy = {
   scene: {
@@ -129,6 +131,61 @@ function saveJson(key, value) {
 
 function saveUploadedDishes() {
   saveJson(SAVED_DISH_KEY, uploadedDishes);
+}
+
+function getSessionId() {
+  const existing = loadJson(SESSION_KEY, "");
+  if (existing) return existing;
+  const id = `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  saveJson(SESSION_KEY, id);
+  return id;
+}
+
+function trackEvent(type, detail = {}) {
+  const payload = {
+    type,
+    sessionId,
+    detail,
+    snapshot: {
+      step: state.step,
+      mode: state.mode,
+      homeSource: state.homeSource,
+      mood: state.mood,
+      taste: state.taste,
+      budget: state.budget,
+      time: state.time,
+      health: state.health,
+      batch: state.recommendationBatch || 0,
+    },
+    time: new Date().toISOString(),
+  };
+
+  try {
+    const body = JSON.stringify(payload);
+    if (navigator.sendBeacon) {
+      const sent = navigator.sendBeacon("/api/events", new Blob([body], { type: "application/json" }));
+      if (sent) return;
+    }
+    fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // 使用记录不能影响正常推荐流程。
+  }
+}
+
+function summarizeItems(items) {
+  return items.slice(0, 3).map((item) => ({
+    id: item.id,
+    name: item.name,
+    source: item.source,
+    price: item.price,
+    time: item.time,
+    health: item.health,
+  }));
 }
 
 function getSavedDishList() {
@@ -236,6 +293,12 @@ function setState(next) {
 }
 
 function chooseItem(id) {
+  const item = getList().find((candidate) => candidate.id === id);
+  trackEvent("select_candidate", {
+    selected: item ? summarizeItems([item])[0] : { id },
+    mode: state.mode,
+    homeSource: state.homeSource,
+  });
   setState({ selectedId: id });
   setTimeout(() => {
     const panel = $("#finalChoice");
@@ -315,6 +378,7 @@ function renderScene() {
   document.querySelectorAll("[data-mode]").forEach((button) => {
     button.addEventListener("click", () => {
       const mode = button.dataset.mode;
+      trackEvent("choose_scene", { mode });
       setState({ mode, step: 2, selectedId: "" });
     });
   });
@@ -352,6 +416,7 @@ function renderHomeSource() {
   document.querySelectorAll("[data-source]").forEach((button) => {
     button.addEventListener("click", () => {
       const source = button.dataset.source;
+      trackEvent("choose_home_source", { homeSource: source });
       if (source === "saved") {
         setState({ homeSource: "saved", step: 5, selectedId: "" });
       } else {
@@ -456,6 +521,7 @@ function renderPreference() {
   bindChoice("health");
   $("#backBtn").addEventListener("click", () => setState({ step: state.mode === "home" ? 2 : 1 }));
   $("#nextBtn").addEventListener("click", () => {
+    const aiNote = $("#aiNoteInput") ? $("#aiNoteInput").value.trim() : "";
     if (state.mode === "out") {
       liveEatOutFoods = [];
     } else {
@@ -467,7 +533,7 @@ function renderPreference() {
       budget: state.budget || "20-40 元",
       time: state.time || "30 分钟内",
       health: state.health || "随意一点",
-      aiNote: $("#aiNoteInput") ? $("#aiNoteInput").value.trim() : "",
+      aiNote,
       refineOpen: false,
       refineReason: "",
       recommendationBatch: 0,
@@ -475,6 +541,18 @@ function renderPreference() {
       loadingTitle: state.mode === "out" ? "正在帮你找附近正餐" : "正在想今天在家做什么",
       loadingDetail: state.mode === "out" ? "先看真实餐厅，再让 AI 帮你缩小选择。" : "我会按你的口味、时间和健康偏好生成 3 个菜谱。",
       step: 6,
+    });
+    trackEvent("submit_preferences", {
+      mode: state.mode,
+      homeSource: state.homeSource,
+      preferences: {
+        mood: state.mood || "热乎的",
+        taste: state.taste || "鲜香",
+        budget: state.budget || "20-40 元",
+        time: state.time || "30 分钟内",
+        health: state.health || "随意一点",
+        hasNote: Boolean(aiNote),
+      },
     });
     if (state.mode === "out") {
       loadNearbyRestaurants();
@@ -531,6 +609,15 @@ async function loadHomeRecipes() {
     }
 
     liveHomeFoods = data.recipes.slice(0, 3);
+    trackEvent("recommendation_loaded", {
+      mode: "home",
+      source: data.source || "unknown",
+      ai: Boolean(data.ai),
+      aiStatus: data.aiStatus || "",
+      batch: state.recommendationBatch || 0,
+      refineReason: state.refineReason,
+      candidates: summarizeItems(liveHomeFoods),
+    });
     setState({
       selectedId: "",
       restaurantMessage: `${data.ai ? "AI 已" : "已"}按今天偏好生成 ${liveHomeFoods.length} 个在家菜谱。`,
@@ -538,6 +625,12 @@ async function loadHomeRecipes() {
     });
   } catch (error) {
     liveHomeFoods = [];
+    trackEvent("recommendation_failed", {
+      mode: "home",
+      message: error.message,
+      batch: state.recommendationBatch || 0,
+      refineReason: state.refineReason,
+    });
     setState({
       restaurantMessage: `AI 菜谱暂时生成失败：${error.message}。先展示本地推荐。`,
       step: 4,
@@ -591,6 +684,16 @@ async function fetchNearbyRestaurants(coords, options = {}) {
     }
 
     liveEatOutFoods = data.restaurants.slice(0, 3);
+    trackEvent("recommendation_loaded", {
+      mode: "out",
+      source: data.source || "unknown",
+      ai: Boolean(data.ai),
+      aiStatus: data.aiStatus || "",
+      batch: state.recommendationBatch || 0,
+      refineReason: state.refineReason,
+      usedTestLocation: Boolean(options.testLocation),
+      candidates: summarizeItems(liveEatOutFoods),
+    });
     const accuracy = Number(data.accuracy || 0);
     const accuracyText = accuracy ? `，定位精度约 ${accuracy} 米` : "";
     const placeText = options.testLocation ? "测试位置附近" : "你附近的位置";
@@ -601,6 +704,12 @@ async function fetchNearbyRestaurants(coords, options = {}) {
     });
   } catch (error) {
     liveEatOutFoods = [];
+    trackEvent("recommendation_failed", {
+      mode: "out",
+      message: error.message,
+      batch: state.recommendationBatch || 0,
+      refineReason: state.refineReason,
+    });
     setState({
       restaurantMessage: `真实餐厅暂时获取失败：${error.message}。先展示模拟推荐。`,
       step: 4,
@@ -610,6 +719,7 @@ async function fetchNearbyRestaurants(coords, options = {}) {
 
 function showLocationHelp(message) {
   liveEatOutFoods = [];
+  trackEvent("location_help", { message });
   setState({
     restaurantMessage: message,
     step: 7,
@@ -662,6 +772,7 @@ function renderLocationHelp() {
     </section>
   `;
   $("#retryLocationBtn").addEventListener("click", () => {
+    trackEvent("retry_location", {});
     setState({
       restaurantMessage: "",
       loadingTitle: "正在重新获取定位",
@@ -671,6 +782,7 @@ function renderLocationHelp() {
     loadNearbyRestaurants();
   });
   $("#testLocationBtn").addEventListener("click", () => {
+    trackEvent("use_test_location", {});
     setState({
       restaurantMessage: "",
       loadingTitle: "正在用测试位置找餐厅",
@@ -681,6 +793,7 @@ function renderLocationHelp() {
   });
   $("#mockLocationBtn").addEventListener("click", () => {
     liveEatOutFoods = [];
+    trackEvent("use_mock_recommendation", { mode: "out" });
     setState({
       restaurantMessage: "已切换为模拟推荐。",
       step: 4,
@@ -728,16 +841,31 @@ function renderResult() {
   $("#shuffleBtn").addEventListener("click", () => {
     const currentIndex = Math.max(0, list.findIndex((item) => item.id === selected.id));
     const next = list[(currentIndex + 1) % list.length];
+    trackEvent("shuffle_final", {
+      from: summarizeItems([selected])[0],
+      to: summarizeItems([next])[0],
+      mode: state.mode,
+      homeSource: state.homeSource,
+    });
     setState({ selectedId: next.id });
   });
   const refineButton = $("#refineBtn");
   if (refineButton) {
-    refineButton.addEventListener("click", () => setState({ refineOpen: true }));
+    refineButton.addEventListener("click", () => {
+      trackEvent("open_refine", { mode: state.mode, homeSource: state.homeSource });
+      setState({ refineOpen: true });
+    });
   }
   const refreshBatchButton = $("#refreshBatchBtn");
   if (refreshBatchButton) {
     refreshBatchButton.addEventListener("click", () => {
       const nextBatch = (state.recommendationBatch || 0) + 1;
+      trackEvent("refresh_batch", {
+        mode: state.mode,
+        homeSource: state.homeSource,
+        fromBatch: state.recommendationBatch || 0,
+        toBatch: nextBatch,
+      });
       setState({
         selectedId: "",
         refineOpen: false,
@@ -762,6 +890,13 @@ function renderResult() {
       const nextBatch = (state.recommendationBatch || 0) + 1;
       liveEatOutFoods = [];
       liveHomeFoods = [];
+      trackEvent("submit_refine", {
+        mode: state.mode,
+        homeSource: state.homeSource,
+        reason: button.dataset.refineReason,
+        fromBatch: state.recommendationBatch || 0,
+        toBatch: nextBatch,
+      });
       setState({
         selectedId: "",
         refineOpen: false,
@@ -864,7 +999,10 @@ function foodShotClass(item) {
 
 function bindSavedDishPicker() {
   document.querySelectorAll("[data-pick-saved]").forEach((button) => {
-    button.addEventListener("click", () => chooseItem(button.dataset.pickSaved));
+    button.addEventListener("click", () => {
+      trackEvent("pick_saved_dish", { dishId: button.dataset.pickSaved });
+      chooseItem(button.dataset.pickSaved);
+    });
   });
 }
 
@@ -891,6 +1029,7 @@ function bindDishEditor() {
         dishOverrides[id] = { ...(dishOverrides[id] || {}), name };
         saveJson(DISH_OVERRIDES_KEY, dishOverrides);
       }
+      trackEvent("edit_saved_dish", { dishId: id, name });
       setState({ editingDishId: "" });
     });
   });
@@ -908,6 +1047,7 @@ function bindDishEditor() {
         delete dishOverrides[id];
         saveJson(DISH_OVERRIDES_KEY, dishOverrides);
       }
+      trackEvent("delete_saved_dish", { dishId: id });
       setState({ selectedId: state.selectedId === id ? "" : state.selectedId, editingDishId: "" });
     });
   });
@@ -978,6 +1118,13 @@ function bindFeedback() {
     feedback.unshift(result);
     saveJson(FEEDBACK_KEY, feedback.slice(0, 50));
     const submitted = await submitFeedback(result);
+    trackEvent("submit_feedback", {
+      target: result.target,
+      choice: result.choice,
+      accuracy: result.accuracy,
+      flow: result.flow,
+      submitted,
+    });
     setState({
       feedbackMessage: submitted
         ? "已提交到后台，也在本机留了一份备份。"
@@ -1102,6 +1249,7 @@ function bindDishUploader() {
       weather: "如果天气不好，从自己会做的菜里挑会更省心。",
       steps: "按你平时的做法来；后续可以加入自动识别和步骤整理。",
     });
+    trackEvent("upload_saved_dish", { name });
     saveUploadedDishes();
     pendingDishImage = "";
     if (state.step === 5) {
@@ -1113,4 +1261,7 @@ function bindDishUploader() {
 }
 
 $("#workspace").addEventListener("click", () => {});
+trackEvent("app_open", {
+  userAgent: navigator.userAgent ? navigator.userAgent.slice(0, 120) : "",
+});
 render();
