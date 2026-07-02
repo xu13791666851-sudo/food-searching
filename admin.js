@@ -5,6 +5,7 @@ const statusText = document.querySelector("#statusText");
 const feedbackList = document.querySelector("#feedbackList");
 
 let currentFeedback = [];
+let currentEvents = [];
 
 const savedToken = localStorage.getItem("food-feedback-admin-token");
 if (savedToken) {
@@ -31,37 +32,68 @@ async function loadFeedback() {
   loadButton.disabled = true;
 
   try {
-    const response = await fetch(`/api/feedback?token=${encodeURIComponent(token)}`);
-    const data = await response.json();
+    const [feedbackResponse, eventsResponse] = await Promise.all([
+      fetch(`/api/feedback?token=${encodeURIComponent(token)}`),
+      fetch(`/api/events?token=${encodeURIComponent(token)}`),
+    ]);
+    const data = await feedbackResponse.json();
+    const eventsData = await eventsResponse.json();
 
-    if (!response.ok || !data.ok) {
+    if (!feedbackResponse.ok || !data.ok) {
       throw new Error(data.message || "读取失败");
+    }
+    if (!eventsResponse.ok || !eventsData.ok) {
+      throw new Error(eventsData.message || "使用记录读取失败");
     }
 
     currentFeedback = Array.isArray(data.feedback) ? data.feedback : [];
-    renderDashboard(currentFeedback);
-    setStatus(currentFeedback.length ? `已读取 ${currentFeedback.length} 条反馈。` : "后端已连通，但暂时还没有反馈。");
+    currentEvents = Array.isArray(eventsData.events) ? eventsData.events : [];
+    renderDashboard(currentFeedback, currentEvents);
+    setStatus(
+      currentFeedback.length || currentEvents.length
+        ? `已读取 ${currentFeedback.length} 条反馈、${currentEvents.length} 条使用记录。`
+        : "后端已连通，但暂时还没有反馈和使用记录。"
+    );
   } catch (error) {
     currentFeedback = [];
-    renderDashboard(currentFeedback);
+    currentEvents = [];
+    renderDashboard(currentFeedback, currentEvents);
     setStatus("读取失败。请检查 token、KV 绑定和重新部署是否完成。", true);
   } finally {
     loadButton.disabled = false;
   }
 }
 
-function renderDashboard(items) {
+function renderDashboard(items, events = []) {
   const total = items.length;
   setText("#totalCount", total);
   setText("#eatRate", percent(countValue(items, "choice", "会吃"), total));
   setText("#accuracyRate", percent(countValue(items, "accuracy", "挺准"), total));
   setText("#flowRate", percent(countValue(items, "flow", "轻松"), total));
+  renderEventDashboard(events);
 
   renderBars("#choiceChart", countBy(items, "choice"), total);
   renderBars("#accuracyChart", countBy(items, "accuracy"), total);
   renderBars("#flowChart", countBy(items, "flow"), total);
   renderBars("#targetChart", countBy(items, "target"), total, 5);
   renderFeedbackList(items);
+}
+
+function renderEventDashboard(events) {
+  const sessions = new Set(events.map((item) => item.sessionId).filter(Boolean));
+  const recommendationEvents = events.filter((item) => item.type === "recommendation_loaded");
+  const refreshEvents = events.filter((item) => item.type === "refresh_batch");
+  const refineEvents = events.filter((item) => item.type === "submit_refine");
+
+  setText("#sessionCount", sessions.size || 0);
+  setText("#recommendationCount", recommendationEvents.length);
+  setText("#refreshCount", refreshEvents.length);
+  setText("#refineCount", refineEvents.length);
+
+  renderBars("#modeChart", countEventModes(events), Math.max(1, events.filter((item) => item.type === "choose_scene").length));
+  renderBars("#selectionChart", countEventSelections(events), Math.max(1, events.filter((item) => item.type === "select_candidate").length), 8);
+  renderBars("#refineChart", countEventDetails(refineEvents, "reason"), Math.max(1, refineEvents.length), 8);
+  renderBars("#aiChart", countAiStatus(recommendationEvents), Math.max(1, recommendationEvents.length), 8);
 }
 
 function renderBars(selector, counts, total, limit = 8) {
@@ -145,6 +177,44 @@ function countBy(items, key) {
 
 function countValue(items, key, value) {
   return items.filter((item) => item[key] === value).length;
+}
+
+function countEventModes(events) {
+  return events
+    .filter((item) => item.type === "choose_scene")
+    .reduce((result, item) => {
+      const mode = item.detail?.mode === "out" ? "外面吃" : item.detail?.mode === "home" ? "在家吃" : "未识别";
+      result[mode] = (result[mode] || 0) + 1;
+      return result;
+    }, {});
+}
+
+function countEventSelections(events) {
+  return events
+    .filter((item) => item.type === "select_candidate")
+    .reduce((result, item) => {
+      const name = item.detail?.selected?.name || "未识别";
+      result[name] = (result[name] || 0) + 1;
+      return result;
+    }, {});
+}
+
+function countEventDetails(events, key) {
+  return events.reduce((result, item) => {
+    const value = item.detail?.[key] || "未填写";
+    result[value] = (result[value] || 0) + 1;
+    return result;
+  }, {});
+}
+
+function countAiStatus(events) {
+  return events.reduce((result, item) => {
+    const ai = item.detail?.ai ? "AI 成功" : "备用推荐";
+    const status = item.detail?.aiStatus ? ` · ${item.detail.aiStatus}` : "";
+    const label = `${ai}${status}`;
+    result[label] = (result[label] || 0) + 1;
+    return result;
+  }, {});
 }
 
 function percent(value, total) {
