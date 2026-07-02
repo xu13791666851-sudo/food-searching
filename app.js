@@ -10,6 +10,7 @@ const state = {
   aiNote: "",
   refineOpen: false,
   refineReason: "",
+  recommendationBatch: 0,
   loadingTitle: "",
   loadingDetail: "",
   selectedId: "",
@@ -26,6 +27,7 @@ let uploadedDishes = loadUploadedDishes();
 let dishOverrides = loadJson(DISH_OVERRIDES_KEY, {});
 let hiddenDishIds = loadJson(HIDDEN_DISH_KEY, []);
 let pendingDishImage = "";
+let liveHomeFoods = [];
 let liveEatOutFoods = [];
 
 const stepCopy = {
@@ -256,6 +258,7 @@ function reset() {
     aiNote: "",
     refineOpen: false,
     refineReason: "",
+    recommendationBatch: 0,
     loadingTitle: "",
     loadingDetail: "",
     selectedId: "",
@@ -263,6 +266,7 @@ function reset() {
     feedbackMessage: "",
     restaurantMessage: "",
   });
+  liveHomeFoods = [];
   liveEatOutFoods = [];
   render();
 }
@@ -454,6 +458,8 @@ function renderPreference() {
   $("#nextBtn").addEventListener("click", () => {
     if (state.mode === "out") {
       liveEatOutFoods = [];
+    } else {
+      liveHomeFoods = [];
     }
     setState({
       mood: state.mood || "热乎的",
@@ -464,13 +470,16 @@ function renderPreference() {
       aiNote: $("#aiNoteInput") ? $("#aiNoteInput").value.trim() : "",
       refineOpen: false,
       refineReason: "",
+      recommendationBatch: 0,
       restaurantMessage: "",
-      loadingTitle: state.mode === "out" ? "正在帮你找附近正餐" : "",
-      loadingDetail: state.mode === "out" ? "先看真实餐厅，再让 AI 帮你缩小选择。" : "",
-      step: state.mode === "out" ? 6 : 4,
+      loadingTitle: state.mode === "out" ? "正在帮你找附近正餐" : "正在想今天在家做什么",
+      loadingDetail: state.mode === "out" ? "先看真实餐厅，再让 AI 帮你缩小选择。" : "我会按你的口味、时间和健康偏好生成 3 个菜谱。",
+      step: 6,
     });
     if (state.mode === "out") {
       loadNearbyRestaurants();
+    } else {
+      loadHomeRecipes();
     }
   });
 }
@@ -498,7 +507,42 @@ function bindChoice(key) {
 
 function getList() {
   if (state.mode === "out") return liveEatOutFoods.length ? liveEatOutFoods : eatOutFoods;
+  if (state.homeSource === "new") return liveHomeFoods.length ? liveHomeFoods : homeFoods;
   return state.homeSource === "saved" ? getSavedDishList() : homeFoods;
+}
+
+async function loadHomeRecipes() {
+  try {
+    const params = new URLSearchParams({
+      mood: state.mood,
+      taste: state.taste,
+      budget: state.budget,
+      time: state.time,
+      health: state.health,
+      note: state.aiNote,
+      refine: state.refineReason,
+      batch: String(state.recommendationBatch || 0),
+    });
+    const response = await fetch(`/api/home-recipes?${params.toString()}`);
+    const data = await response.json();
+
+    if (!response.ok || !data.ok || !Array.isArray(data.recipes) || !data.recipes.length) {
+      throw new Error(data.message || "没有返回菜谱");
+    }
+
+    liveHomeFoods = data.recipes.slice(0, 3);
+    setState({
+      selectedId: "",
+      restaurantMessage: `${data.ai ? "AI 已" : "已"}按今天偏好生成 ${liveHomeFoods.length} 个在家菜谱。`,
+      step: 4,
+    });
+  } catch (error) {
+    liveHomeFoods = [];
+    setState({
+      restaurantMessage: `AI 菜谱暂时生成失败：${error.message}。先展示本地推荐。`,
+      step: 4,
+    });
+  }
 }
 
 function loadNearbyRestaurants(options = {}) {
@@ -537,6 +581,7 @@ async function fetchNearbyRestaurants(coords, options = {}) {
       time: state.time,
       note: state.aiNote,
       refine: state.refineReason,
+      batch: String(state.recommendationBatch || 0),
     });
     const response = await fetch(`/api/restaurants?${params.toString()}`);
     const data = await response.json();
@@ -583,6 +628,8 @@ function getLocationMessage(error) {
 
 function renderLoading() {
   updateShell("result");
+  const isOut = state.mode === "out";
+  const steps = isOut ? ["读取附近餐厅", "排除不合适的店", "AI 帮你重新排序"] : ["理解今天偏好", "生成家常菜谱", "选出更省心的 3 个"];
   $("#workspace").innerHTML = `
     <section class="loading-panel">
       <p class="eyebrow">正在寻找</p>
@@ -594,9 +641,7 @@ function renderLoading() {
         <span></span>
       </div>
       <div class="search-steps">
-        <span>读取附近餐厅</span>
-        <span>排除不合适的店</span>
-        <span>AI 帮你重新排序</span>
+        ${steps.map((item) => `<span>${item}</span>`).join("")}
       </div>
     </section>
   `;
@@ -647,12 +692,13 @@ function renderResult() {
   updateShell("result");
   const list = getList();
   const selected = list.find((item) => item.id === state.selectedId) || list[0];
+  const canRefine = state.mode === "out" || (state.mode === "home" && state.homeSource === "new");
   $("#workspace").innerHTML = `
     <div class="section-title compact">
       <p class="eyebrow">${state.mode === "out" ? "附近推荐" : state.homeSource === "saved" ? "从你的菜里挑" : "今天做这个"}</p>
       <h2>给你挑了 ${list.length} 个</h2>
       <p class="muted-line">${state.mood} · ${state.taste} · ${state.time}</p>
-      ${state.mode === "out" && state.restaurantMessage ? `<p class="form-message">${state.restaurantMessage}</p>` : ""}
+      ${state.restaurantMessage ? `<p class="form-message">${state.restaurantMessage}</p>` : ""}
     </div>
     <div class="candidate-list">
       ${list.map((item) => candidateCard(item)).join("")}
@@ -662,14 +708,17 @@ function renderResult() {
       <h2>今天就吃：${selected.name}</h2>
       <p>${selected.reason}</p>
       <div class="weather-note">${selected.weather}</div>
+      ${state.mode === "home" && selected.ingredients ? `<p class="steps"><strong>准备食材：</strong>${selected.ingredients}</p>` : ""}
       ${state.mode === "home" ? `<p class="steps"><strong>简单做法：</strong>${selected.steps}</p>` : ""}
       <div class="action-row">
         <button class="secondary-button" type="button" id="restartInline">重新选</button>
         <button class="primary-button" type="button" id="shuffleBtn">换一个最终答案</button>
-        ${state.mode === "out" ? `<button class="secondary-button" type="button" id="refineBtn">都不太想吃</button>` : ""}
+        ${state.mode === "home" && state.homeSource === "new" ? `<button class="secondary-button" type="button" id="refreshBatchBtn">换一批菜谱</button>` : ""}
+        ${state.mode === "out" ? `<button class="secondary-button" type="button" id="refreshBatchBtn">再找 3 个</button>` : ""}
+        ${canRefine ? `<button class="secondary-button" type="button" id="refineBtn">都不太想吃</button>` : ""}
       </div>
     </section>
-    ${state.mode === "out" && state.refineOpen ? refinePanel() : ""}
+    ${canRefine && state.refineOpen ? refinePanel() : ""}
     ${feedbackPanel(`${state.mode === "out" ? "外面吃" : "在家推荐"}：${selected.name}`)}
   `;
   document.querySelectorAll("[data-select]").forEach((button) => {
@@ -685,25 +734,59 @@ function renderResult() {
   if (refineButton) {
     refineButton.addEventListener("click", () => setState({ refineOpen: true }));
   }
-  document.querySelectorAll("[data-refine-reason]").forEach((button) => {
-    button.addEventListener("click", () => {
-      liveEatOutFoods = [];
+  const refreshBatchButton = $("#refreshBatchBtn");
+  if (refreshBatchButton) {
+    refreshBatchButton.addEventListener("click", () => {
+      const nextBatch = (state.recommendationBatch || 0) + 1;
       setState({
         selectedId: "",
-        refineReason: button.dataset.refineReason,
+        refineOpen: false,
+        refineReason: "",
+        recommendationBatch: nextBatch,
         restaurantMessage: "",
-        loadingTitle: "正在重新帮你筛一轮",
+        loadingTitle: state.mode === "out" ? "正在再找 3 个" : "正在换一批菜谱",
+        loadingDetail: state.mode === "out" ? "这次会从附近餐厅里继续挑新的选择。" : "保留今天偏好，但换一组新的在家做法。",
+        step: 6,
+      });
+      if (state.mode === "out") {
+        liveEatOutFoods = [];
+        loadNearbyRestaurants();
+      } else {
+        liveHomeFoods = [];
+        loadHomeRecipes();
+      }
+    });
+  }
+  document.querySelectorAll("[data-refine-reason]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextBatch = (state.recommendationBatch || 0) + 1;
+      liveEatOutFoods = [];
+      liveHomeFoods = [];
+      setState({
+        selectedId: "",
+        refineOpen: false,
+        refineReason: button.dataset.refineReason,
+        recommendationBatch: nextBatch,
+        restaurantMessage: "",
+        loadingTitle: state.mode === "out" ? "正在重新帮你筛一轮" : "正在按原因重新想菜谱",
         loadingDetail: `收到：${button.dataset.refineReason}。这次会优先避开这个问题。`,
         step: 6,
       });
-      loadNearbyRestaurants();
+      if (state.mode === "out") {
+        loadNearbyRestaurants();
+      } else {
+        loadHomeRecipes();
+      }
     });
   });
   bindFeedback();
 }
 
 function refinePanel() {
-  const reasons = ["太贵", "太远", "不像正餐", "不想吃这个口味", "换轻一点"];
+  const reasons =
+    state.mode === "out"
+      ? ["太贵", "太远", "不像正餐", "不想吃这个口味", "换轻一点"]
+      : ["太麻烦", "没食材", "太油", "太清淡", "换个口味"];
   return `
     <section class="refine-panel simple-block">
       <h3>哪里不对？</h3>
