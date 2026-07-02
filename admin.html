@@ -43,6 +43,25 @@
       </article>
     </section>
 
+    <section class="metric-grid" aria-label="使用概览">
+      <article class="metric-card usage-card">
+        <span>使用次数</span>
+        <strong id="sessionCount">0</strong>
+      </article>
+      <article class="metric-card usage-card">
+        <span>推荐生成</span>
+        <strong id="recommendationCount">0</strong>
+      </article>
+      <article class="metric-card usage-card">
+        <span>换一批</span>
+        <strong id="refreshCount">0</strong>
+      </article>
+      <article class="metric-card usage-card">
+        <span>不满意重筛</span>
+        <strong id="refineCount">0</strong>
+      </article>
+    </section>
+
     <section class="insight-grid">
       <article class="insight-card">
         <div class="section-heading">
@@ -74,6 +93,38 @@
           <h2>被反馈最多</h2>
         </div>
         <div id="targetChart" class="bar-list"></div>
+      </article>
+
+      <article class="insight-card">
+        <div class="section-heading">
+          <p class="eyebrow">使用路径</p>
+          <h2>在家还是外面</h2>
+        </div>
+        <div id="modeChart" class="bar-list"></div>
+      </article>
+
+      <article class="insight-card">
+        <div class="section-heading">
+          <p class="eyebrow">最终选择</p>
+          <h2>朋友选了什么</h2>
+        </div>
+        <div id="selectionChart" class="bar-list"></div>
+      </article>
+
+      <article class="insight-card">
+        <div class="section-heading">
+          <p class="eyebrow">不满意原因</p>
+          <h2>哪里不对</h2>
+        </div>
+        <div id="refineChart" class="bar-list"></div>
+      </article>
+
+      <article class="insight-card">
+        <div class="section-heading">
+          <p class="eyebrow">AI 状态</p>
+          <h2>推荐是否成功</h2>
+        </div>
+        <div id="aiChart" class="bar-list"></div>
       </article>
     </section>
 
