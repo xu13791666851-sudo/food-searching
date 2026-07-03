@@ -836,6 +836,36 @@ p {
   line-height: 1.55;
 }
 
+.next-action-panel {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 248, 223, 0.78);
+}
+
+.next-action-panel > strong {
+  font-size: 15px;
+}
+
+.shopping-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shopping-list span {
+  padding: 7px 10px;
+  border: 2px solid var(--line);
+  border-radius: 999px;
+  background: #fff8df;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
 figure {
   margin: 0;
   overflow: hidden;
