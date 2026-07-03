@@ -198,6 +198,30 @@ p {
   gap: 12px;
 }
 
+.preference-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.preference-group {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.preference-group h3 {
+  margin-bottom: 0;
+  font-size: 15px;
+}
+
+.chip-grid.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .big-choice {
   min-height: 114px;
   display: grid;
@@ -851,9 +875,24 @@ p {
 }
 
 .shopping-list {
+  display: grid;
+  gap: 9px;
+}
+
+.shopping-section {
+  display: grid;
+  gap: 7px;
+}
+
+.shopping-section > strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.shopping-section > div {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
 }
 
 .shopping-list span {
