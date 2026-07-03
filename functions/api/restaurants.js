@@ -288,6 +288,7 @@ function formatRestaurant(poi, index, preference) {
     weather: cleanText(poi.address, 80) || "已根据你当前位置查找附近餐厅。",
     amapId: poi.id || "",
     address: cleanText(poi.address, 80),
+    location: cleanText(poi.location, 60),
     distance,
   };
 }
