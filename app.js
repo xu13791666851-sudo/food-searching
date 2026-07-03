@@ -62,11 +62,30 @@ const stepCopy = {
   },
 };
 
-const moods = ["热乎的", "清爽的", "重口味", "轻一点", "快速解决", "安慰一下自己"];
-const tastes = ["不辣", "微辣", "鲜香", "酸甜", "米饭类", "面食类"];
-const budgets = ["20 元内", "20-40 元", "40-60 元"];
-const times = ["15 分钟内", "30 分钟内", "慢一点也行"];
-const healthOptions = ["随意一点", "清淡一点", "高蛋白"];
+const preferenceProfiles = {
+  home: {
+    intro: "像跟懂吃的朋友说一下，我会按做饭状态推荐。",
+    groups: [
+      { key: "mood", label: "今天做饭状态", options: ["懒得动", "简单做", "认真做一顿", "想被安慰"] },
+      { key: "taste", label: "想吃的感觉", options: ["下饭热乎", "清爽少油", "高蛋白", "想喝汤", "重口味", "一锅出"] },
+      { key: "time", label: "能接受的时间", options: ["15 分钟内", "30 分钟内", "45 分钟也行"] },
+      { key: "health", label: "厨房要求", options: ["少洗碗", "不想买菜", "可以下楼买一点", "健康一点"] },
+      { key: "budget", label: "食材预算", options: ["20 元内", "20-40 元", "40-60 元"] },
+    ],
+    notePlaceholder: "比如：家里有鸡蛋和番茄，不想洗太多碗，最好能配米饭。",
+  },
+  out: {
+    intro: "我会按距离、正餐感、预算和排队成本来筛附近店。",
+    groups: [
+      { key: "mood", label: "这顿的场景", options: ["一个人吃", "和朋友吃", "快速解决", "想坐一会儿"] },
+      { key: "taste", label: "口味方向", options: ["正餐饱腹", "清淡点", "重口味", "汤汤水水", "米饭类", "面食类"] },
+      { key: "time", label: "距离/时间", options: ["越近越好", "15 分钟内", "可以走远点"] },
+      { key: "budget", label: "人均预算", options: ["30 元内", "30-60 元", "60-100 元", "今天可以贵点"] },
+      { key: "health", label: "排队接受度", options: ["不排队", "可等 10 分钟", "好吃可以等"] },
+    ],
+    notePlaceholder: "比如：不要咖啡甜品，想吃正餐，最好 500 米内，别太贵。",
+  },
+};
 
 const savedDishes = [
   {
@@ -383,7 +402,19 @@ function renderScene() {
     button.addEventListener("click", () => {
       const mode = button.dataset.mode;
       trackEvent("choose_scene", { mode });
-      setState({ mode, step: 2, selectedId: "" });
+      setState({
+        mode,
+        step: 2,
+        selectedId: "",
+        mood: "",
+        taste: "",
+        budget: "",
+        time: "",
+        health: "",
+        aiNote: "",
+        actionMessage: "",
+        shoppingList: [],
+      });
     });
   });
 }
@@ -422,9 +453,21 @@ function renderHomeSource() {
       const source = button.dataset.source;
       trackEvent("choose_home_source", { homeSource: source });
       if (source === "saved") {
-        setState({ homeSource: "saved", step: 5, selectedId: "" });
+        setState({ homeSource: "saved", step: 5, selectedId: "", actionMessage: "", shoppingList: [] });
       } else {
-        setState({ homeSource: "new", step: 3, selectedId: "" });
+        setState({
+          homeSource: "new",
+          step: 3,
+          selectedId: "",
+          mood: "",
+          taste: "",
+          budget: "",
+          time: "",
+          health: "",
+          aiNote: "",
+          actionMessage: "",
+          shoppingList: [],
+        });
       }
     });
   });
@@ -488,32 +531,19 @@ function renderSavedDishList() {
 function renderPreference() {
   updateShell("preference");
   const isOut = state.mode === "out";
+  const profile = preferenceProfiles[isOut ? "out" : "home"];
   $("#workspace").innerHTML = `
     <div class="section-title compact">
       <p class="eyebrow">${isOut ? "外面吃" : state.homeSource === "saved" ? "从做过的菜里挑" : "按今天偏好推荐"}</p>
       <h2>${isOut ? "今天外面想吃什么？" : "今天在家想吃什么？"}</h2>
-      <p class="muted-line">${isOut ? "我会优先考虑距离、价格和下雨天是否舒服。" : "我会按今天的状态给你 3 个家常选择。"}</p>
+      <p class="muted-line">${profile.intro}</p>
+    </div>
+    <div class="preference-stack">
+      ${profile.groups.map((group) => preferenceGroup(group)).join("")}
     </div>
     <div class="simple-block">
-      <h3>今天的感觉</h3>
-      <div class="chip-grid">
-        ${moods.map((item) => chip("mood", item)).join("")}
-      </div>
-    </div>
-    <div class="simple-block">
-      <h3>口味方向</h3>
-      <div class="chip-grid">
-        ${tastes.map((item) => chip("taste", item)).join("")}
-      </div>
-    </div>
-    <div class="quick-grid">
-      ${quickSelect("budget", isOut ? "人均预算" : "食材预算", budgets)}
-      ${quickSelect("time", isOut ? "路程/等餐" : "做饭时间", times)}
-      ${quickSelect("health", "健康程度", healthOptions)}
-    </div>
-    <div class="simple-block">
-      <h3>还有什么想补充？</h3>
-      <textarea class="ai-note-input" id="aiNoteInput" rows="3" placeholder="比如：今天很累，不想走太远，想吃饱但别太油">${escapeHtml(state.aiNote)}</textarea>
+      <h3>像跟朋友说一句</h3>
+      <textarea class="ai-note-input" id="aiNoteInput" rows="3" placeholder="${profile.notePlaceholder}">${escapeHtml(state.aiNote)}</textarea>
     </div>
     <div class="action-row sticky-actions">
       <button class="secondary-button" type="button" id="backBtn">上一步</button>
@@ -534,11 +564,11 @@ function renderPreference() {
       liveHomeFoods = [];
     }
     setState({
-      mood: state.mood || "热乎的",
-      taste: state.taste || "鲜香",
-      budget: state.budget || "20-40 元",
-      time: state.time || "30 分钟内",
-      health: state.health || "随意一点",
+      mood: state.mood || defaultPreference(profile, "mood"),
+      taste: state.taste || defaultPreference(profile, "taste"),
+      time: state.time || defaultPreference(profile, "time"),
+      budget: state.budget || defaultPreference(profile, "budget"),
+      health: state.health || defaultPreference(profile, "health"),
       aiNote,
       refineOpen: false,
       refineReason: "",
@@ -554,11 +584,11 @@ function renderPreference() {
       mode: state.mode,
       homeSource: state.homeSource,
       preferences: {
-        mood: state.mood || "热乎的",
-        taste: state.taste || "鲜香",
-        budget: state.budget || "20-40 元",
-        time: state.time || "30 分钟内",
-        health: state.health || "随意一点",
+        mood: state.mood || defaultPreference(profile, "mood"),
+        taste: state.taste || defaultPreference(profile, "taste"),
+        time: state.time || defaultPreference(profile, "time"),
+        budget: state.budget || defaultPreference(profile, "budget"),
+        health: state.health || defaultPreference(profile, "health"),
         hasNote: Boolean(aiNote),
       },
     });
@@ -572,6 +602,21 @@ function renderPreference() {
 
 function chip(key, value) {
   return `<button class="chip ${selectedClass(value, state[key])}" type="button" data-${key}="${value}">${value}</button>`;
+}
+
+function preferenceGroup(group) {
+  return `
+    <section class="preference-group">
+      <h3>${group.label}</h3>
+      <div class="chip-grid compact">
+        ${group.options.map((item) => chip(group.key, item)).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function defaultPreference(profile, key) {
+  return profile.groups.find((group) => group.key === key)?.options[0] || "";
 }
 
 function quickSelect(key, label, options) {
@@ -976,7 +1021,16 @@ function nextActionPanel(item) {
       </div>
       ${
         state.shoppingList.length
-          ? `<div class="shopping-list">${state.shoppingList.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}</div>`
+          ? `<div class="shopping-list">${state.shoppingList
+              .map(
+                (section) => `
+                  <div class="shopping-section">
+                    <strong>${escapeHtml(section.title)}</strong>
+                    <div>${section.items.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}</div>
+                  </div>
+                `
+              )
+              .join("")}</div>`
           : ""
       }
       ${state.actionMessage ? `<p class="form-message">${escapeHtml(state.actionMessage)}</p>` : ""}
@@ -1020,7 +1074,7 @@ function bindNextActions(item) {
   const copyShoppingListButton = $("#copyShoppingListBtn");
   if (copyShoppingListButton) {
     copyShoppingListButton.addEventListener("click", async () => {
-      const copied = await copyText(`【${item.name}采购清单】\n${state.shoppingList.map((name) => `- ${name}`).join("\n")}`);
+      const copied = await copyText(formatShoppingListText(item.name, state.shoppingList));
       trackEvent("copy_shopping_list", { name: item.name, copied });
       setState({ actionMessage: copied ? "采购清单已复制。" : "复制失败，可以手动复制清单。" });
     });
@@ -1057,13 +1111,51 @@ function formatRestaurantAddress(item) {
 }
 
 function buildShoppingList(item) {
-  const source = item.ingredients || inferIngredients(item.name);
+  if (Array.isArray(item.shoppingList) && item.shoppingList.length) {
+    return item.shoppingList
+      .map((section) => ({
+        title: section.title || "需要购买",
+        items: Array.isArray(section.items) ? section.items.map((name) => String(name).trim()).filter(Boolean).slice(0, 8) : [],
+      }))
+      .filter((section) => section.items.length);
+  }
+
+  const ingredients = splitIngredients(item.ingredients || inferIngredients(item.name));
+  return [
+    {
+      title: "主食材",
+      items: ingredients.slice(0, 3),
+    },
+    {
+      title: "配菜",
+      items: ingredients.slice(3, 6).length ? ingredients.slice(3, 6) : ["青菜", "菌菇", "洋葱"],
+    },
+    {
+      title: "调味料",
+      items: inferSeasonings(item.name),
+    },
+    {
+      title: "家里常备",
+      items: ["盐", "油", "生抽"],
+    },
+    {
+      title: "可替换",
+      items: inferSubstitutes(item.name),
+    },
+  ].filter((section) => section.items.length);
+}
+
+function splitIngredients(source) {
   return source
     .split(/[、,，;；\n]/)
     .map((name) => name.trim())
     .filter(Boolean)
     .filter((name, index, list) => list.indexOf(name) === index)
     .slice(0, 12);
+}
+
+function formatShoppingListText(name, list) {
+  return [`【${name}采购清单】`, ...list.map((section) => `${section.title}：${section.items.join("、")}`)].join("\n");
 }
 
 function inferIngredients(name) {
@@ -1074,6 +1166,22 @@ function inferIngredients(name) {
   if (name.includes("牛")) return "牛肉、土豆、胡萝卜、葱姜";
   if (name.includes("饭")) return "米饭、鸡蛋、青菜、肉类";
   return "主菜食材、配菜、葱姜蒜、基础调味";
+}
+
+function inferSeasonings(name) {
+  if (name.includes("照烧")) return ["生抽", "蜂蜜", "料酒", "蒜"];
+  if (name.includes("酸汤")) return ["番茄", "醋", "白胡椒", "盐"];
+  if (name.includes("拌饭") || name.includes("饭")) return ["生抽", "蚝油", "蒜", "黑胡椒"];
+  if (name.includes("面") || name.includes("汤")) return ["盐", "白胡椒", "香油"];
+  return ["生抽", "蚝油", "葱姜蒜"];
+}
+
+function inferSubstitutes(name) {
+  if (name.includes("牛")) return ["牛肉可换鸡肉", "米饭可换面条"];
+  if (name.includes("虾")) return ["虾仁可换鸡蛋", "豆腐可换菌菇"];
+  if (name.includes("鸡")) return ["鸡腿肉可换鸡胸肉", "青菜按家里现有替换"];
+  if (name.includes("面")) return ["面条可换米线", "菌菇可换青菜"];
+  return ["主食材可按冰箱现有替换"];
 }
 
 function candidateCard(item) {
