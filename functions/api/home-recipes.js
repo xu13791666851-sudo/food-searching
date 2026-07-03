@@ -129,6 +129,14 @@ function buildRecipeMessages(preference) {
               weather: "一句今天适合吃它的说明",
               ingredients: "主要食材，顿号分隔",
               steps: "2-3 步简短做法",
+              imagePrompt: "一句适合生成菜品图的中文描述，不要出现文字和餐具品牌",
+              shoppingList: [
+                { title: "主食材", items: ["食材和份量"] },
+                { title: "配菜", items: ["食材和份量"] },
+                { title: "调味料", items: ["调味料"] },
+                { title: "家里常备", items: ["通常家里有的东西"] },
+                { title: "可替换", items: ["替换建议"] },
+              ],
             },
           ],
         },
@@ -154,9 +162,37 @@ function normalizeRecipes(recipes, preference) {
       weather: cleanText(recipe.weather, 80) || "按今天的状态推荐，适合在家省心做。",
       ingredients: cleanText(recipe.ingredients, 120),
       steps: cleanText(recipe.steps, 180),
+      imagePrompt: cleanText(recipe.imagePrompt, 120) || `${cleanText(recipe.name, 30)}，家常菜成品图，热乎有食欲，自然光`,
+      shoppingList: normalizeShoppingList(recipe.shoppingList, recipe.ingredients, recipe.name),
     }))
     .filter((recipe) => recipe.name && recipe.reason && recipe.steps)
     .slice(0, 3);
+}
+
+function normalizeShoppingList(value, ingredients, name) {
+  if (Array.isArray(value)) {
+    const sections = value
+      .map((section) => ({
+        title: cleanText(section && section.title, 16) || "需要购买",
+        items: Array.isArray(section && section.items)
+          ? section.items.map((item) => cleanText(item, 28)).filter(Boolean).slice(0, 8)
+          : [],
+      }))
+      .filter((section) => section.items.length);
+    if (sections.length) return sections.slice(0, 5);
+  }
+
+  const basic = cleanText(ingredients, 160)
+    .split(/[、,，;；\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return [
+    { title: "主食材", items: basic.slice(0, 4) },
+    { title: "调味料", items: name && name.includes("汤") ? ["盐", "白胡椒", "香油"] : ["生抽", "蚝油", "葱姜蒜"] },
+    { title: "家里常备", items: ["盐", "油"] },
+    { title: "可替换", items: ["按冰箱现有食材替换"] },
+  ].filter((section) => section.items.length);
 }
 
 function fallbackRecipes(preference) {
@@ -170,6 +206,14 @@ function fallbackRecipes(preference) {
       health: "82 分 · 蛋白质足",
       weather: "下雨天吃热乎盖饭，比冷食更舒服。",
       ingredients: "牛肉片、番茄、鸡蛋、米饭",
+      imagePrompt: "番茄牛肉滑蛋饭，红黄配色，盖在热米饭上，家常有食欲",
+      shoppingList: [
+        { title: "主食材", items: ["牛肉片 150g", "番茄 2 个", "鸡蛋 2 个", "米饭 1 碗"] },
+        { title: "配菜", items: ["葱花", "青菜可选"] },
+        { title: "调味料", items: ["生抽", "蚝油", "白胡椒"] },
+        { title: "家里常备", items: ["盐", "油", "淀粉"] },
+        { title: "可替换", items: ["牛肉可换鸡腿肉", "米饭可换面条"] },
+      ],
       steps: "牛肉快速滑熟盛出，番茄炒出汁，加鸡蛋和牛肉收一下，盖到米饭上。",
     },
     {
@@ -181,6 +225,14 @@ function fallbackRecipes(preference) {
       health: "86 分 · 清爽少油",
       weather: "小雨天适合一碗热汤面，省事又舒服。",
       ingredients: "面条、鸡蛋、菌菇、青菜",
+      imagePrompt: "菌菇鸡蛋热汤面，一碗清爽热汤面，青菜和鸡蛋明显，暖色自然光",
+      shoppingList: [
+        { title: "主食材", items: ["面条 1 份", "鸡蛋 1 个", "菌菇 1 把"] },
+        { title: "配菜", items: ["青菜 1 把", "葱花"] },
+        { title: "调味料", items: ["盐", "白胡椒", "香油"] },
+        { title: "家里常备", items: ["油", "清水"] },
+        { title: "可替换", items: ["面条可换米线", "菌菇可换番茄"] },
+      ],
       steps: "菌菇煮出鲜味，下面条和青菜，最后卧一个蛋并简单调味。",
     },
     {
@@ -192,6 +244,14 @@ function fallbackRecipes(preference) {
       health: "88 分 · 少油高蛋白",
       weather: "热乎一小锅很适合阴雨天，也不会太腻。",
       ingredients: "虾仁、嫩豆腐、鸡蛋、葱",
+      imagePrompt: "虾仁豆腐煲，小锅热菜，虾仁和豆腐清晰，汤汁微微冒热气",
+      shoppingList: [
+        { title: "主食材", items: ["虾仁 120g", "嫩豆腐 1 盒", "鸡蛋 1 个"] },
+        { title: "配菜", items: ["葱花", "菌菇可选"] },
+        { title: "调味料", items: ["盐", "白胡椒", "生抽"] },
+        { title: "家里常备", items: ["油", "淀粉"] },
+        { title: "可替换", items: ["虾仁可换鸡蛋", "豆腐可换菌菇"] },
+      ],
       steps: "虾仁煎香，加豆腐和少量汤汁煮开，淋蛋液后小火焖几分钟。",
     },
     {
@@ -203,6 +263,14 @@ function fallbackRecipes(preference) {
       health: "76 分 · 家常均衡",
       weather: "热饭配小炒，雨天在家吃很踏实。",
       ingredients: "里脊肉、青椒、米饭、蒜",
+      imagePrompt: "青椒肉丝拌饭，青椒肉丝盖在米饭上，家常快手菜，色泽鲜亮",
+      shoppingList: [
+        { title: "主食材", items: ["里脊肉 150g", "青椒 2 个", "米饭 1 碗"] },
+        { title: "配菜", items: ["蒜", "洋葱可选"] },
+        { title: "调味料", items: ["生抽", "蚝油", "黑胡椒"] },
+        { title: "家里常备", items: ["盐", "油", "淀粉"] },
+        { title: "可替换", items: ["里脊可换鸡胸肉", "青椒可换彩椒"] },
+      ],
       steps: "肉丝腌一下炒散，加青椒大火快炒，调味后盖到米饭上。",
     },
     {
@@ -214,6 +282,14 @@ function fallbackRecipes(preference) {
       health: "74 分 · 开胃满足",
       weather: "阴雨天吃一碗酸汤热米线，很有安慰感。",
       ingredients: "肥牛、米线、番茄、金针菇",
+      imagePrompt: "酸汤肥牛米线，热汤米线，肥牛番茄金针菇丰富，酸爽开胃",
+      shoppingList: [
+        { title: "主食材", items: ["肥牛 150g", "米线 1 份", "番茄 1 个"] },
+        { title: "配菜", items: ["金针菇 1 把", "青菜可选"] },
+        { title: "调味料", items: ["醋", "白胡椒", "盐"] },
+        { title: "家里常备", items: ["油", "葱姜蒜"] },
+        { title: "可替换", items: ["肥牛可换鸡蛋", "米线可换面条"] },
+      ],
       steps: "番茄炒软加水煮汤，放米线和配菜，最后下肥牛烫熟。",
     },
     {
@@ -225,6 +301,14 @@ function fallbackRecipes(preference) {
       health: "84 分 · 高蛋白",
       weather: "想吃得满足一点，又不想太油时比较合适。",
       ingredients: "鸡腿排、西兰花、胡萝卜、蒜",
+      imagePrompt: "蒜香鸡腿排配蔬菜，煎鸡腿排搭配绿色蔬菜，清爽高蛋白",
+      shoppingList: [
+        { title: "主食材", items: ["鸡腿排 1 块", "西兰花 半颗", "胡萝卜 半根"] },
+        { title: "配菜", items: ["蒜", "小番茄可选"] },
+        { title: "调味料", items: ["生抽", "黑胡椒", "料酒"] },
+        { title: "家里常备", items: ["盐", "油"] },
+        { title: "可替换", items: ["鸡腿排可换鸡胸肉", "西兰花可换青菜"] },
+      ],
       steps: "鸡腿排煎到两面金黄，蔬菜焯水或煎熟，最后用蒜香汁简单调味。",
     },
   ];
