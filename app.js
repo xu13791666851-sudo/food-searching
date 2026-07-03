@@ -17,6 +17,8 @@ const state = {
   editingDishId: "",
   feedbackMessage: "",
   restaurantMessage: "",
+  actionMessage: "",
+  shoppingList: [],
 };
 
 const SAVED_DISH_KEY = "food-helper-saved-dishes";
@@ -299,7 +301,7 @@ function chooseItem(id) {
     mode: state.mode,
     homeSource: state.homeSource,
   });
-  setState({ selectedId: id });
+  setState({ selectedId: id, actionMessage: "", shoppingList: [] });
   setTimeout(() => {
     const panel = $("#finalChoice");
     if (panel && panel.scrollIntoView) {
@@ -328,6 +330,8 @@ function reset() {
     editingDishId: "",
     feedbackMessage: "",
     restaurantMessage: "",
+    actionMessage: "",
+    shoppingList: [],
   });
   liveHomeFoods = [];
   liveEatOutFoods = [];
@@ -463,6 +467,7 @@ function renderSavedDishList() {
         <h2>今天在家吃：${pickedDish.name}</h2>
         <p>${pickedDish.reason}</p>
         <div class="weather-note">${pickedDish.weather}</div>
+        ${nextActionPanel(pickedDish)}
       </section>
       ${feedbackPanel(`在家旧菜：${pickedDish.name}`)}
     `
@@ -476,6 +481,7 @@ function renderSavedDishList() {
   bindDishUploader();
   bindSavedDishPicker();
   bindDishEditor();
+  if (pickedDish) bindNextActions(pickedDish);
   bindFeedback();
 }
 
@@ -538,6 +544,8 @@ function renderPreference() {
       refineReason: "",
       recommendationBatch: 0,
       restaurantMessage: "",
+      actionMessage: "",
+      shoppingList: [],
       loadingTitle: state.mode === "out" ? "正在帮你找附近正餐" : "正在想今天在家做什么",
       loadingDetail: state.mode === "out" ? "先看真实餐厅，再让 AI 帮你缩小选择。" : "我会按你的口味、时间和健康偏好生成 3 个菜谱。",
       step: 6,
@@ -620,6 +628,8 @@ async function loadHomeRecipes() {
     });
     setState({
       selectedId: "",
+      actionMessage: "",
+      shoppingList: [],
       restaurantMessage: `${data.ai ? "AI 已" : "已"}按今天偏好生成 ${liveHomeFoods.length} 个在家菜谱。`,
       step: 4,
     });
@@ -699,6 +709,8 @@ async function fetchNearbyRestaurants(coords, options = {}) {
     const placeText = options.testLocation ? "测试位置附近" : "你附近的位置";
     setState({
       selectedId: "",
+      actionMessage: "",
+      shoppingList: [],
       restaurantMessage: `已根据${placeText}找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你重新排序" : ""}。`,
       step: 4,
     });
@@ -823,6 +835,7 @@ function renderResult() {
       <div class="weather-note">${selected.weather}</div>
       ${state.mode === "home" && selected.ingredients ? `<p class="steps"><strong>准备食材：</strong>${selected.ingredients}</p>` : ""}
       ${state.mode === "home" ? `<p class="steps"><strong>简单做法：</strong>${selected.steps}</p>` : ""}
+      ${nextActionPanel(selected)}
       <div class="action-row">
         <button class="secondary-button" type="button" id="restartInline">重新选</button>
         <button class="primary-button" type="button" id="shuffleBtn">换一个最终答案</button>
@@ -847,7 +860,7 @@ function renderResult() {
       mode: state.mode,
       homeSource: state.homeSource,
     });
-    setState({ selectedId: next.id });
+    setState({ selectedId: next.id, actionMessage: "", shoppingList: [] });
   });
   const refineButton = $("#refineBtn");
   if (refineButton) {
@@ -872,6 +885,8 @@ function renderResult() {
         refineReason: "",
         recommendationBatch: nextBatch,
         restaurantMessage: "",
+        actionMessage: "",
+        shoppingList: [],
         loadingTitle: state.mode === "out" ? "正在再找 3 个" : "正在换一批菜谱",
         loadingDetail: state.mode === "out" ? "这次会从附近餐厅里继续挑新的选择。" : "保留今天偏好，但换一组新的在家做法。",
         step: 6,
@@ -885,6 +900,7 @@ function renderResult() {
       }
     });
   }
+  bindNextActions(selected);
   document.querySelectorAll("[data-refine-reason]").forEach((button) => {
     button.addEventListener("click", () => {
       const nextBatch = (state.recommendationBatch || 0) + 1;
@@ -903,6 +919,8 @@ function renderResult() {
         refineReason: button.dataset.refineReason,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
+        actionMessage: "",
+        shoppingList: [],
         loadingTitle: state.mode === "out" ? "正在重新帮你筛一轮" : "正在按原因重新想菜谱",
         loadingDetail: `收到：${button.dataset.refineReason}。这次会优先避开这个问题。`,
         step: 6,
@@ -933,6 +951,129 @@ function refinePanel() {
       </div>
     </section>
   `;
+}
+
+function nextActionPanel(item) {
+  if (state.mode === "out") {
+    return `
+      <section class="next-action-panel">
+        <strong>下一步</strong>
+        <div class="action-row">
+          <button class="primary-button" type="button" id="openAmapBtn">打开高德导航</button>
+          <button class="secondary-button" type="button" id="copyAddressBtn">复制店名地址</button>
+        </div>
+        ${state.actionMessage ? `<p class="form-message">${escapeHtml(state.actionMessage)}</p>` : ""}
+      </section>
+    `;
+  }
+
+  return `
+    <section class="next-action-panel">
+      <strong>下一步</strong>
+      <div class="action-row">
+        <button class="primary-button" type="button" id="shoppingListBtn">生成采购清单</button>
+        ${state.shoppingList.length ? `<button class="secondary-button" type="button" id="copyShoppingListBtn">复制清单</button>` : ""}
+      </div>
+      ${
+        state.shoppingList.length
+          ? `<div class="shopping-list">${state.shoppingList.map((name) => `<span>${escapeHtml(name)}</span>`).join("")}</div>`
+          : ""
+      }
+      ${state.actionMessage ? `<p class="form-message">${escapeHtml(state.actionMessage)}</p>` : ""}
+    </section>
+  `;
+}
+
+function bindNextActions(item) {
+  const openAmapButton = $("#openAmapBtn");
+  if (openAmapButton) {
+    openAmapButton.addEventListener("click", () => {
+      const url = buildAmapUrl(item);
+      trackEvent("open_amap", { name: item.name, hasLocation: Boolean(item.location), address: item.address || item.weather || "" });
+      window.open(url, "_blank", "noopener");
+    });
+  }
+
+  const copyAddressButton = $("#copyAddressBtn");
+  if (copyAddressButton) {
+    copyAddressButton.addEventListener("click", async () => {
+      const copied = await copyText(formatRestaurantAddress(item));
+      trackEvent("copy_restaurant_address", { name: item.name, copied });
+      setState({
+        actionMessage: copied ? "店名和地址已复制，可以发给朋友或粘贴到地图里。" : "复制失败，可以手动复制店名和地址。",
+      });
+    });
+  }
+
+  const shoppingListButton = $("#shoppingListBtn");
+  if (shoppingListButton) {
+    shoppingListButton.addEventListener("click", () => {
+      const list = buildShoppingList(item);
+      trackEvent("generate_shopping_list", { name: item.name, count: list.length });
+      setState({
+        shoppingList: list,
+        actionMessage: list.length ? "采购清单已生成，可以照着买。" : "这道菜暂时没有足够食材信息，可以按平时做法准备。",
+      });
+    });
+  }
+
+  const copyShoppingListButton = $("#copyShoppingListBtn");
+  if (copyShoppingListButton) {
+    copyShoppingListButton.addEventListener("click", async () => {
+      const copied = await copyText(`【${item.name}采购清单】\n${state.shoppingList.map((name) => `- ${name}`).join("\n")}`);
+      trackEvent("copy_shopping_list", { name: item.name, copied });
+      setState({ actionMessage: copied ? "采购清单已复制。" : "复制失败，可以手动复制清单。" });
+    });
+  }
+}
+
+function buildAmapUrl(item) {
+  const location = String(item.location || "").split(",");
+  const lng = Number(location[0]);
+  const lat = Number(location[1]);
+
+  if (Number.isFinite(lng) && Number.isFinite(lat)) {
+    const url = new URL("https://uri.amap.com/navigation");
+    url.searchParams.set("to", `${lng},${lat},${item.name}`);
+    url.searchParams.set("mode", "walk");
+    url.searchParams.set("policy", "1");
+    url.searchParams.set("coordinate", "gaode");
+    url.searchParams.set("callnative", "1");
+    return url.toString();
+  }
+
+  const url = new URL("https://uri.amap.com/search");
+  url.searchParams.set("keyword", `${item.name} ${item.address || item.weather || ""}`.trim());
+  url.searchParams.set("callnative", "1");
+  return url.toString();
+}
+
+function formatRestaurantAddress(item) {
+  return [
+    `店名：${item.name}`,
+    `地址：${item.address || item.weather || "地址暂未返回"}`,
+    `参考：${item.price || ""} ${item.time || ""}`.trim(),
+  ].join("\n");
+}
+
+function buildShoppingList(item) {
+  const source = item.ingredients || inferIngredients(item.name);
+  return source
+    .split(/[、,，;；\n]/)
+    .map((name) => name.trim())
+    .filter(Boolean)
+    .filter((name, index, list) => list.indexOf(name) === index)
+    .slice(0, 12);
+}
+
+function inferIngredients(name) {
+  if (name.includes("番茄") || name.includes("滑蛋")) return "番茄、鸡蛋、牛肉片、米饭、葱";
+  if (name.includes("面")) return "面条、青菜、鸡蛋、菌菇";
+  if (name.includes("豆腐") || name.includes("虾仁")) return "嫩豆腐、虾仁、鸡蛋、葱";
+  if (name.includes("鸡")) return "鸡腿肉、青菜、米饭、蒜";
+  if (name.includes("牛")) return "牛肉、土豆、胡萝卜、葱姜";
+  if (name.includes("饭")) return "米饭、鸡蛋、青菜、肉类";
+  return "主菜食材、配菜、葱姜蒜、基础调味";
 }
 
 function candidateCard(item) {
