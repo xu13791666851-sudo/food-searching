@@ -886,7 +886,7 @@ function renderResult() {
         <button class="primary-button" type="button" id="shuffleBtn">换一个最终答案</button>
         ${state.mode === "home" && state.homeSource === "new" ? `<button class="secondary-button" type="button" id="refreshBatchBtn">换一批菜谱</button>` : ""}
         ${state.mode === "out" ? `<button class="secondary-button" type="button" id="refreshBatchBtn">再找 3 个</button>` : ""}
-        ${canRefine ? `<button class="secondary-button" type="button" id="refineBtn">都不太想吃</button>` : ""}
+        ${canRefine ? `<button class="secondary-button" type="button" id="refineBtn">${state.mode === "out" ? "继续跟我说" : "都不太想吃"}</button>` : ""}
       </div>
     </section>
     ${canRefine && state.refineOpen ? refinePanel() : ""}
@@ -911,7 +911,7 @@ function renderResult() {
   if (refineButton) {
     refineButton.addEventListener("click", () => {
       trackEvent("open_refine", { mode: state.mode, homeSource: state.homeSource });
-      setState({ refineOpen: true });
+      setState({ refineOpen: true, actionMessage: "" });
     });
   }
   const refreshBatchButton = $("#refreshBatchBtn");
@@ -946,6 +946,38 @@ function renderResult() {
     });
   }
   bindNextActions(selected);
+  const followupSubmitButton = $("#followupSubmitBtn");
+  if (followupSubmitButton) {
+    followupSubmitButton.addEventListener("click", () => {
+      const input = $("#followupInput");
+      const message = input ? input.value.trim() : "";
+      if (!message) {
+        setState({ actionMessage: "先告诉我一句你想换的方向。" });
+        return;
+      }
+      const nextBatch = (state.recommendationBatch || 0) + 1;
+      liveEatOutFoods = [];
+      trackEvent("submit_followup", {
+        mode: "out",
+        message,
+        fromBatch: state.recommendationBatch || 0,
+        toBatch: nextBatch,
+      });
+      setState({
+        selectedId: "",
+        refineOpen: false,
+        refineReason: message,
+        recommendationBatch: nextBatch,
+        restaurantMessage: "",
+        actionMessage: "",
+        shoppingList: [],
+        loadingTitle: "正在按你的话重新找",
+        loadingDetail: `收到：${message}。这次会带着这句话重新筛。`,
+        step: 6,
+      });
+      loadNearbyRestaurants();
+    });
+  }
   document.querySelectorAll("[data-refine-reason]").forEach((button) => {
     button.addEventListener("click", () => {
       const nextBatch = (state.recommendationBatch || 0) + 1;
@@ -987,8 +1019,15 @@ function refinePanel() {
       : ["太麻烦", "没食材", "太油", "太清淡", "换个口味"];
   return `
     <section class="refine-panel simple-block">
-      <h3>哪里不对？</h3>
-      <p class="muted-line">点一个原因，我会带着这个原因重新筛选。</p>
+      <h3>${state.mode === "out" ? "继续跟我说" : "哪里不对？"}</h3>
+      <p class="muted-line">${state.mode === "out" ? "补一句你的新要求，我会直接带着它重新筛附近餐厅。" : "点一个原因，我会带着这个原因重新筛选。"}</p>
+      ${
+        state.mode === "out"
+          ? `<textarea class="ai-note-input" id="followupInput" rows="3" placeholder="比如：不要商场店，想吃热汤，再近一点，别超过 40 元。">${escapeHtml(state.refineReason)}</textarea>
+             <button class="primary-button full-width-button" type="button" id="followupSubmitBtn">按这句话重新找</button>`
+          : ""
+      }
+      ${state.actionMessage ? `<p class="form-message">${escapeHtml(state.actionMessage)}</p>` : ""}
       <div class="refine-options">
         ${reasons
           .map((reason) => `<button class="mini-chip ${selectedClass(reason, state.refineReason)}" type="button" data-refine-reason="${reason}">${reason}</button>`)
