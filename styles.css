@@ -543,6 +543,11 @@ p {
   padding: 0 14px;
 }
 
+.full-width-button {
+  width: 100%;
+  flex: none;
+}
+
 .primary-button {
   border-color: var(--tomato);
   background: var(--tomato);
@@ -1455,4 +1460,3 @@ figure {
     font-size: 48px;
   }
 }
-
