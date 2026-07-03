@@ -12,7 +12,7 @@ export async function onRequestGet(context) {
   const budget = cleanText(url.searchParams.get("budget"), 40);
   const time = cleanText(url.searchParams.get("time"), 40);
   const note = cleanText(url.searchParams.get("note"), 200);
-  const refine = cleanText(url.searchParams.get("refine"), 60);
+  const refine = cleanText(url.searchParams.get("refine"), 160);
   const batch = Math.max(0, Math.min(5, Number(url.searchParams.get("batch") || 0)));
 
   if (!context.env.AMAP_KEY) {
@@ -344,13 +344,24 @@ function isRefineReasonable(poi, refine, budget) {
   const cost = Number(costValue(poi));
   const distance = Number(poi.distance || 0);
   const text = `${poi.name || ""} ${poi.type || ""}`;
+  const maxCost = extractMaxNumber(refine, "元");
+  const maxDistance = extractMaxNumber(refine, "米");
 
   if (refine.includes("太贵") && Number.isFinite(cost) && cost > budgetMax(budget)) return false;
   if (refine.includes("太远") && Number.isFinite(distance) && distance > 1200) return false;
+  if ((refine.includes("近一点") || refine.includes("再近") || refine.includes("更近")) && Number.isFinite(distance) && distance > 900) return false;
+  if (Number.isFinite(maxDistance) && Number.isFinite(distance) && distance > maxDistance) return false;
+  if (Number.isFinite(maxCost) && Number.isFinite(cost) && cost > maxCost) return false;
+  if ((refine.includes("不要商场") || refine.includes("不想去商场")) && /商场|购物中心|广场|mall/i.test(`${poi.name || ""} ${poi.address || ""}`)) return false;
   if (refine.includes("不像正餐") && !/中餐|快餐|简餐|饭|面|粉|火锅|烧烤|烤肉|日料|日本料理|韩国料理|小吃|餐厅|酒楼/.test(text)) return false;
   if (refine.includes("换轻一点") && /火锅|烧烤|烤肉|炸|麻辣|重慶|重庆|川菜|湘菜|冒菜|烤鱼/.test(text)) return false;
 
   return true;
+}
+
+function extractMaxNumber(text, unit) {
+  const match = String(text || "").match(new RegExp(`(\\d{2,4})\\s*${unit}`));
+  return match ? Number(match[1]) : NaN;
 }
 
 function isBudgetReasonable(poi, budget, refine = "") {
