@@ -358,6 +358,10 @@ function isBudgetReasonable(poi, budget, refine = "") {
   if (!Number.isFinite(cost) || cost <= 0) return true;
   const max = budgetMax(budget);
   if (refine.includes("太贵")) return cost <= max;
+  if (budget.includes("30 元内")) return cost <= 40;
+  if (budget.includes("30-60")) return cost <= 80;
+  if (budget.includes("60-100")) return cost <= 130;
+  if (budget.includes("贵点")) return true;
   if (budget.includes("20 元内")) return cost <= 35;
   if (budget.includes("20-40")) return cost <= 70;
   if (budget.includes("40-60")) return cost <= 110;
@@ -365,6 +369,10 @@ function isBudgetReasonable(poi, budget, refine = "") {
 }
 
 function budgetMax(budget) {
+  if (budget.includes("30 元内")) return 35;
+  if (budget.includes("30-60")) return 65;
+  if (budget.includes("60-100")) return 110;
+  if (budget.includes("贵点")) return 180;
   if (budget.includes("20 元内")) return 25;
   if (budget.includes("20-40")) return 45;
   if (budget.includes("40-60")) return 70;
@@ -474,6 +482,10 @@ function keywordFromTaste(taste) {
 }
 
 function priceFromBudget(budget) {
+  if (budget.includes("30 元内")) return "约 30 元内/人";
+  if (budget.includes("30-60")) return "约 30-60 元/人";
+  if (budget.includes("60-100")) return "约 60-100 元/人";
+  if (budget.includes("贵点")) return "价格可以放宽";
   if (budget.includes("20 元内")) return "约 20 元内/人";
   if (budget.includes("20-40")) return "约 20-40 元/人";
   if (budget.includes("40-60")) return "约 40-60 元/人";
