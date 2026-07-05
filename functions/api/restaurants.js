@@ -25,24 +25,27 @@ export async function onRequestGet(context) {
 
   try {
     const searchPoint = wgs84ToGcj02(lat, lng);
-    const primary = await fetchAmapRestaurants(context.env.AMAP_KEY, {
+    const strictText = `${refine} ${note} ${taste} ${time} ${budget}`;
+    const primary = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
       lat: searchPoint.lat,
       lng: searchPoint.lng,
       keyword: refine.includes("不想吃这个口味") ? "" : keywordFromTaste(taste),
-      radius: "3000",
-      offset: "10",
-      page: String((batch % 3) + 1),
+      radius: radiusFromPreference(strictText),
+      offset: "25",
+      pageStart: batch * 2 + 1,
+      pages: 2,
     });
 
     const result = primary.pois.length
       ? primary
-      : await fetchAmapRestaurants(context.env.AMAP_KEY, {
+      : await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
           lat: searchPoint.lat,
           lng: searchPoint.lng,
           keyword: "",
           radius: "10000",
-          offset: "20",
-          page: String((batch % 3) + 1),
+          offset: "25",
+          pageStart: batch * 2 + 1,
+          pages: 3,
         });
 
     if (!result.ok) {
@@ -56,11 +59,19 @@ export async function onRequestGet(context) {
     const mealCandidates = result.pois
       .filter((poi) => poi && poi.name)
       .filter((poi) => isMealRestaurant(poi));
-    const refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, refine, budget));
-    const budgetCandidates = refinedCandidates.filter((poi) => isBudgetReasonable(poi, budget, refine));
-    const candidatePois = budgetCandidates.length >= 3 ? budgetCandidates : refinedCandidates.length >= 3 ? refinedCandidates : mealCandidates;
+    const refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, strictText, budget));
+    const budgetCandidates = refinedCandidates.filter((poi) => isBudgetReasonable(poi, budget, strictText));
+    const distanceCandidates = budgetCandidates.filter((poi) => isDistanceReasonable(poi, strictText));
+    const candidatePois =
+      distanceCandidates.length >= 6
+        ? distanceCandidates
+        : budgetCandidates.length >= 6
+          ? budgetCandidates
+          : refinedCandidates.length >= 6
+            ? refinedCandidates
+            : mealCandidates;
     const restaurants = candidatePois
-      .slice(0, 6)
+      .slice(0, 18)
       .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note, refine }));
 
     if (!restaurants.length) {
@@ -120,6 +131,35 @@ async function fetchAmapRestaurants(key, options) {
   return {
     ok: true,
     pois: data.pois,
+    radius: options.radius,
+  };
+}
+
+async function fetchAmapRestaurantPool(key, options) {
+  const pages = Array.from({ length: options.pages || 1 }, (_, index) => String((options.pageStart || 1) + index));
+  const results = await Promise.all(
+    pages.map((page) =>
+      fetchAmapRestaurants(key, {
+        ...options,
+        page,
+      })
+    )
+  );
+  const okResult = results.find((item) => item.ok) || results[0] || { ok: false, pois: [] };
+  const seen = new Set();
+  const pois = results
+    .flatMap((item) => (Array.isArray(item.pois) ? item.pois : []))
+    .filter((poi) => {
+      const id = poi && (poi.id || `${poi.name}-${poi.address}`);
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+
+  return {
+    ...okResult,
+    ok: okResult.ok,
+    pois,
     radius: options.radius,
   };
 }
@@ -218,7 +258,7 @@ function buildAiMessages(restaurants, preference) {
     {
       role: "user",
       content: JSON.stringify({
-              task: "请从候选餐厅里选出最适合今天的 3 家，并给出简短推荐理由。只返回 JSON，不要 Markdown。",
+              task: "请从候选餐厅里选出最适合今天的 6 家，并给出简短推荐理由。只返回 JSON，不要 Markdown。",
               refinement_rule: preference.refine
                 ? `用户刚才不满意的原因是：${preference.refine}。这次必须优先避开这个问题。`
                 : "这是第一次推荐，按用户偏好和真实餐厅事实排序。",
@@ -279,12 +319,12 @@ function formatRestaurant(poi, index, preference) {
     id: `amap-${poi.id || index}`,
     name: cleanText(poi.name, 60),
     image,
-    source: `附近 ${distance || "未知"}m · 高德真实餐厅`,
+    source: `高德显示约 ${distance || "未知"}m · 真实餐厅`,
     tag: type.slice(0, 4),
     reason: buildReason(poi, preference, minutes),
-    price: cost ? `约 ${cost} 元/人` : priceFromBudget(preference.budget),
-    time: typeof minutes === "number" ? `步行约 ${minutes} 分钟` : "路程未知",
-    health: rating ? `${rating} 分 · 参考评分` : "真实店铺 · 可再看评价",
+    price: cost ? `高德参考人均 ${cost} 元` : "价格未知",
+    time: typeof minutes === "number" ? `高德步行估算约 ${minutes} 分钟` : "路程未知",
+    health: rating ? `高德评分 ${rating}` : "真实店铺 · 可再看评价",
     weather: cleanText(poi.address, 80) || "已根据你当前位置查找附近餐厅。",
     amapId: poi.id || "",
     address: cleanText(poi.address, 80),
@@ -353,10 +393,14 @@ function isRefineReasonable(poi, refine, budget) {
   if (Number.isFinite(maxDistance) && Number.isFinite(distance) && distance > maxDistance) return false;
   if (Number.isFinite(maxCost) && Number.isFinite(cost) && cost > maxCost) return false;
   if ((refine.includes("不要商场") || refine.includes("不想去商场")) && /商场|购物中心|广场|mall/i.test(`${poi.name || ""} ${poi.address || ""}`)) return false;
-  if (refine.includes("不像正餐") && !/中餐|快餐|简餐|饭|面|粉|火锅|烧烤|烤肉|日料|日本料理|韩国料理|小吃|餐厅|酒楼/.test(text)) return false;
+  if ((refine.includes("不像正餐") || refine.includes("要正餐") || refine.includes("正餐饱腹")) && !isProperMealText(text)) return false;
   if (refine.includes("换轻一点") && /火锅|烧烤|烤肉|炸|麻辣|重慶|重庆|川菜|湘菜|冒菜|烤鱼/.test(text)) return false;
 
   return true;
+}
+
+function isProperMealText(text) {
+  return /中餐|快餐|简餐|饭|面|粉|火锅|烧烤|烤肉|日料|日本料理|韩国料理|小吃|餐厅|酒楼|食堂|砂锅|馄饨|饺子|粥|米线|盖浇|炒菜|本帮|粤菜|川菜|湘菜/.test(text);
 }
 
 function extractMaxNumber(text, unit) {
@@ -376,6 +420,16 @@ function isBudgetReasonable(poi, budget, refine = "") {
   if (budget.includes("20 元内")) return cost <= 35;
   if (budget.includes("20-40")) return cost <= 70;
   if (budget.includes("40-60")) return cost <= 110;
+  return true;
+}
+
+function isDistanceReasonable(poi, preferenceText) {
+  const distance = Number(poi.distance || 0);
+  if (!Number.isFinite(distance) || distance <= 0) return true;
+  const explicitDistance = extractMaxNumber(preferenceText, "米");
+  if (Number.isFinite(explicitDistance)) return distance <= explicitDistance;
+  if (preferenceText.includes("越近越好")) return distance <= 900;
+  if (preferenceText.includes("15 分钟内")) return distance <= 1500;
   return true;
 }
 
@@ -453,10 +507,13 @@ function priceReason(cost, budget) {
   if (!cost) return "";
   const price = Number(cost);
   if (!Number.isFinite(price)) return "";
-  if (budget.includes("20 元内") && price > 25) return `人均约 ${price} 元，可能略超预算`;
-  if (budget.includes("20-40") && price >= 15 && price <= 45) return `人均约 ${price} 元，和预算比较贴近`;
-  if (budget.includes("40-60") && price >= 30 && price <= 70) return `人均约 ${price} 元，和预算比较贴近`;
-  return `人均约 ${price} 元`;
+  if (budget.includes("30 元内") && price > 35) return `高德参考人均 ${price} 元，可能略超预算`;
+  if (budget.includes("30-60") && price >= 25 && price <= 70) return `高德参考人均 ${price} 元，和预算比较贴近`;
+  if (budget.includes("60-100") && price >= 50 && price <= 120) return `高德参考人均 ${price} 元，和预算比较贴近`;
+  if (budget.includes("20 元内") && price > 25) return `高德参考人均 ${price} 元，可能略超预算`;
+  if (budget.includes("20-40") && price >= 15 && price <= 45) return `高德参考人均 ${price} 元，和预算比较贴近`;
+  if (budget.includes("40-60") && price >= 30 && price <= 70) return `高德参考人均 ${price} 元，和预算比较贴近`;
+  return `高德参考人均 ${price} 元`;
 }
 
 function ratingValue(poi) {
@@ -488,8 +545,19 @@ function keywordFromTaste(taste) {
   if (taste.includes("辣")) return "川菜 湘菜 火锅";
   if (taste.includes("面")) return "面馆 面食";
   if (taste.includes("米饭")) return "盖饭 炒饭 简餐 快餐";
+  if (taste.includes("热汤") || taste.includes("汤汤水水")) return "汤饭 面馆 馄饨 米线";
+  if (taste.includes("正餐")) return "中餐 快餐 简餐";
   if (taste.includes("酸甜")) return "粤菜 本帮菜";
   return "中餐 快餐 简餐";
+}
+
+function radiusFromPreference(text) {
+  const explicitDistance = extractMaxNumber(text, "米");
+  if (Number.isFinite(explicitDistance)) return String(Math.min(Math.max(explicitDistance, 500), 10000));
+  if (text.includes("越近越好") || text.includes("再近") || text.includes("近一点")) return "1200";
+  if (text.includes("15 分钟内")) return "1800";
+  if (text.includes("可以走远点")) return "5000";
+  return "3000";
 }
 
 function priceFromBudget(budget) {
