@@ -9,6 +9,7 @@ const state = {
   health: "",
   aiNote: "",
   refineOpen: false,
+  locationOpen: false,
   refineReason: "",
   recommendationBatch: 0,
   loadingTitle: "",
@@ -354,7 +355,7 @@ function chooseItem(id) {
     mode: state.mode,
     homeSource: state.homeSource,
   });
-  setState({ selectedId: id, actionMessage: "", shoppingList: [] });
+  setState({ selectedId: id, actionMessage: "", shoppingList: [], locationOpen: false });
   setTimeout(() => {
     const panel = $("#finalChoice");
     if (panel && panel.scrollIntoView) {
@@ -375,6 +376,7 @@ function reset() {
     health: "",
     aiNote: "",
     refineOpen: false,
+    locationOpen: false,
     refineReason: "",
     recommendationBatch: 0,
     loadingTitle: "",
@@ -771,7 +773,7 @@ async function loadRestaurantsByPlace(keyword) {
     }
 
     const place = data.place;
-    setState({ manualPlace: place });
+    setState({ manualPlace: place, locationOpen: false });
     trackEvent("manual_place_loaded", { keyword, placeName: place.name });
     fetchNearbyRestaurants(
       { latitude: place.lat, longitude: place.lng, accuracy: 0 },
@@ -782,6 +784,7 @@ async function loadRestaurantsByPlace(keyword) {
     setState({
       actionMessage: `换位置失败：${error.message}`,
       restaurantMessage: `没有找到“${keyword}”这个位置，可以换个更具体的地名。`,
+      locationOpen: true,
       step: 4,
     });
   }
@@ -827,6 +830,8 @@ async function fetchNearbyRestaurants(coords, options = {}) {
     const searchPlaceText = options.manualPlace ? `${options.manualPlace.name}附近` : placeText;
     setState({
       selectedId: "",
+      refineOpen: false,
+      locationOpen: false,
       actionMessage: "",
       shoppingList: [],
       restaurantMessage: `已根据${searchPlaceText}整理出 ${liveEatOutFoods.length} 个候选${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你排序" : ""}。距离和人均为高德参考值。`,
@@ -842,6 +847,7 @@ async function fetchNearbyRestaurants(coords, options = {}) {
     });
     setState({
       restaurantMessage: `真实餐厅暂时获取失败：${error.message}。先展示模拟推荐。`,
+      locationOpen: Boolean(options.manualPlace),
       step: 4,
     });
   }
@@ -956,13 +962,20 @@ function renderResult() {
       ${state.mode === "home" && selected.ingredients ? `<p class="steps"><strong>准备食材：</strong>${selected.ingredients}</p>` : ""}
       ${state.mode === "home" ? `<p class="steps"><strong>简单做法：</strong>${selected.steps}</p>` : ""}
       ${nextActionPanel(selected)}
-      <div class="action-row">
-        <button class="secondary-button" type="button" id="restartInline">重新选</button>
-        <button class="primary-button" type="button" id="shuffleBtn">换一个最终答案</button>
-        ${state.mode === "home" && state.homeSource === "new" ? `<button class="secondary-button" type="button" id="refreshBatchBtn">换一批菜谱</button>` : ""}
-        ${state.mode === "out" ? `<button class="secondary-button" type="button" id="refreshBatchBtn">再找 3 个</button>` : ""}
-        ${canRefine ? `<button class="secondary-button" type="button" id="refineBtn">${state.mode === "out" ? "继续跟我说" : "都不太想吃"}</button>` : ""}
-      </div>
+      ${
+        state.mode === "out"
+          ? `<div class="result-tool-row">
+              <button class="quiet-button" type="button" id="restartInline">重新选</button>
+              <button class="quiet-button" type="button" id="locationToggleBtn">${state.locationOpen ? "收起换位置" : "位置不准？换个位置找"}</button>
+              <button class="quiet-button" type="button" id="refineBtn">${state.refineOpen ? "正在继续沟通" : "不太对？继续跟我说"}</button>
+            </div>`
+          : `<div class="action-row">
+              <button class="secondary-button" type="button" id="restartInline">重新选</button>
+              <button class="primary-button" type="button" id="shuffleBtn">换一个最终答案</button>
+              ${state.homeSource === "new" ? `<button class="secondary-button" type="button" id="refreshBatchBtn">换一批菜谱</button>` : ""}
+              ${canRefine ? `<button class="secondary-button" type="button" id="refineBtn">都不太想吃</button>` : ""}
+            </div>`
+      }
     </section>
     ${canRefine && state.refineOpen ? refinePanel() : ""}
     ${feedbackPanel(`${state.mode === "out" ? "外面吃" : "在家推荐"}：${selected.name}`)}
@@ -971,22 +984,32 @@ function renderResult() {
     button.addEventListener("click", () => chooseItem(button.dataset.select));
   });
   $("#restartInline").addEventListener("click", reset);
-  $("#shuffleBtn").addEventListener("click", () => {
-    const currentIndex = Math.max(0, list.findIndex((item) => item.id === selected.id));
-    const next = list[(currentIndex + 1) % list.length];
-    trackEvent("shuffle_final", {
-      from: summarizeItems([selected])[0],
-      to: summarizeItems([next])[0],
-      mode: state.mode,
-      homeSource: state.homeSource,
+  const shuffleButton = $("#shuffleBtn");
+  if (shuffleButton) {
+    shuffleButton.addEventListener("click", () => {
+      const currentIndex = Math.max(0, list.findIndex((item) => item.id === selected.id));
+      const next = list[(currentIndex + 1) % list.length];
+      trackEvent("shuffle_final", {
+        from: summarizeItems([selected])[0],
+        to: summarizeItems([next])[0],
+        mode: state.mode,
+        homeSource: state.homeSource,
+      });
+      setState({ selectedId: next.id, actionMessage: "", shoppingList: [], locationOpen: false });
     });
-    setState({ selectedId: next.id, actionMessage: "", shoppingList: [] });
-  });
+  }
+  const locationToggleButton = $("#locationToggleBtn");
+  if (locationToggleButton) {
+    locationToggleButton.addEventListener("click", () => {
+      trackEvent("open_manual_place", { open: !state.locationOpen });
+      setState({ locationOpen: !state.locationOpen, refineOpen: false, actionMessage: "" });
+    });
+  }
   const refineButton = $("#refineBtn");
   if (refineButton) {
     refineButton.addEventListener("click", () => {
       trackEvent("open_refine", { mode: state.mode, homeSource: state.homeSource });
-      setState({ refineOpen: true, actionMessage: "" });
+      setState({ refineOpen: true, locationOpen: false, actionMessage: "" });
     });
   }
   const refreshBatchButton = $("#refreshBatchBtn");
@@ -1002,12 +1025,13 @@ function renderResult() {
       setState({
         selectedId: "",
         refineOpen: false,
+        locationOpen: false,
         refineReason: "",
         recommendationBatch: nextBatch,
         restaurantMessage: "",
         actionMessage: "",
         shoppingList: [],
-        loadingTitle: state.mode === "out" ? "正在再找 3 个" : "正在换一批菜谱",
+        loadingTitle: state.mode === "out" ? "正在换一批推荐" : "正在换一批菜谱",
         loadingDetail: state.mode === "out" ? "这次会从附近餐厅里继续挑新的选择。" : "保留今天偏好，但换一组新的在家做法。",
         step: 6,
       });
@@ -1041,6 +1065,7 @@ function renderResult() {
       setState({
         selectedId: "",
         refineOpen: false,
+        locationOpen: false,
         refineReason: message,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
@@ -1068,6 +1093,7 @@ function renderResult() {
       setState({
         selectedId: "",
         refineOpen: false,
+        locationOpen: false,
         refineReason: button.dataset.refineReason,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
@@ -1115,19 +1141,23 @@ function refinePanel() {
 function nextActionPanel(item) {
   if (state.mode === "out") {
     return `
-      <section class="next-action-panel">
-        <strong>下一步</strong>
-        <div class="action-row">
+      <section class="next-action-panel out-next-panel">
+        <strong>现在就去</strong>
+        <div class="action-row main-next-actions">
           <button class="primary-button" type="button" id="openAmapBtn">打开高德导航</button>
           <button class="secondary-button" type="button" id="copyAddressBtn">复制店名地址</button>
         </div>
-        <div class="manual-place-box">
-          <label for="manualPlaceInput">换个位置找</label>
-          <div>
-            <input id="manualPlaceInput" type="text" value="${escapeHtml(state.manualPlace?.name || "")}" placeholder="输入商圈、地铁站、地址，比如静安寺" />
-            <button class="secondary-button" type="button" id="manualPlaceBtn">重新找</button>
-          </div>
-        </div>
+        ${
+          state.locationOpen
+            ? `<div class="manual-place-box">
+                <label for="manualPlaceInput">输入一个更准确的位置</label>
+                <div>
+                  <input id="manualPlaceInput" type="text" value="${escapeHtml(state.manualPlace?.name || "")}" placeholder="商圈、地铁站、地址，比如静安寺" />
+                  <button class="secondary-button" type="button" id="manualPlaceBtn">重新找</button>
+                </div>
+              </div>`
+            : ""
+        }
         ${state.actionMessage ? `<p class="form-message">${escapeHtml(state.actionMessage)}</p>` : ""}
       </section>
     `;
@@ -1195,6 +1225,7 @@ function bindNextActions(item) {
       setState({
         selectedId: "",
         refineOpen: false,
+        locationOpen: false,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
         actionMessage: "",
