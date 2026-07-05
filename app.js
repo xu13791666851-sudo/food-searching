@@ -10,6 +10,7 @@ const state = {
   aiNote: "",
   refineOpen: false,
   locationOpen: false,
+  locationSearchFailed: false,
   refineReason: "",
   recommendationBatch: 0,
   loadingTitle: "",
@@ -355,7 +356,7 @@ function chooseItem(id) {
     mode: state.mode,
     homeSource: state.homeSource,
   });
-  setState({ selectedId: id, actionMessage: "", shoppingList: [], locationOpen: false });
+  setState({ selectedId: id, actionMessage: "", shoppingList: [], locationOpen: false, locationSearchFailed: false });
   setTimeout(() => {
     const panel = $("#finalChoice");
     if (panel && panel.scrollIntoView) {
@@ -377,6 +378,7 @@ function reset() {
     aiNote: "",
     refineOpen: false,
     locationOpen: false,
+    locationSearchFailed: false,
     refineReason: "",
     recommendationBatch: 0,
     loadingTitle: "",
@@ -773,7 +775,7 @@ async function loadRestaurantsByPlace(keyword) {
     }
 
     const place = data.place;
-    setState({ manualPlace: place, locationOpen: false });
+    setState({ manualPlace: place, locationOpen: false, locationSearchFailed: false });
     trackEvent("manual_place_loaded", { keyword, placeName: place.name });
     fetchNearbyRestaurants(
       { latitude: place.lat, longitude: place.lng, accuracy: 0 },
@@ -785,6 +787,7 @@ async function loadRestaurantsByPlace(keyword) {
       actionMessage: `换位置失败：${error.message}`,
       restaurantMessage: `没有找到“${keyword}”这个位置，可以换个更具体的地名。`,
       locationOpen: true,
+      locationSearchFailed: true,
       step: 4,
     });
   }
@@ -832,6 +835,7 @@ async function fetchNearbyRestaurants(coords, options = {}) {
       selectedId: "",
       refineOpen: false,
       locationOpen: false,
+      locationSearchFailed: false,
       actionMessage: "",
       shoppingList: [],
       restaurantMessage: `已根据${searchPlaceText}整理出 ${liveEatOutFoods.length} 个候选${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你排序" : ""}。距离和人均为高德参考值。`,
@@ -848,6 +852,7 @@ async function fetchNearbyRestaurants(coords, options = {}) {
     setState({
       restaurantMessage: `真实餐厅暂时获取失败：${error.message}。先展示模拟推荐。`,
       locationOpen: Boolean(options.manualPlace),
+      locationSearchFailed: Boolean(options.manualPlace),
       step: 4,
     });
   }
@@ -1002,14 +1007,14 @@ function renderResult() {
   if (locationToggleButton) {
     locationToggleButton.addEventListener("click", () => {
       trackEvent("open_manual_place", { open: !state.locationOpen });
-      setState({ locationOpen: !state.locationOpen, refineOpen: false, actionMessage: "" });
+      setState({ locationOpen: !state.locationOpen, refineOpen: false, actionMessage: "", locationSearchFailed: false });
     });
   }
   const refineButton = $("#refineBtn");
   if (refineButton) {
     refineButton.addEventListener("click", () => {
       trackEvent("open_refine", { mode: state.mode, homeSource: state.homeSource });
-      setState({ refineOpen: true, locationOpen: false, actionMessage: "" });
+      setState({ refineOpen: true, locationOpen: false, locationSearchFailed: false, actionMessage: "" });
     });
   }
   const refreshBatchButton = $("#refreshBatchBtn");
@@ -1026,6 +1031,7 @@ function renderResult() {
         selectedId: "",
         refineOpen: false,
         locationOpen: false,
+        locationSearchFailed: false,
         refineReason: "",
         recommendationBatch: nextBatch,
         restaurantMessage: "",
@@ -1066,6 +1072,7 @@ function renderResult() {
         selectedId: "",
         refineOpen: false,
         locationOpen: false,
+        locationSearchFailed: false,
         refineReason: message,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
@@ -1094,6 +1101,7 @@ function renderResult() {
         selectedId: "",
         refineOpen: false,
         locationOpen: false,
+        locationSearchFailed: false,
         refineReason: button.dataset.refineReason,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
@@ -1155,6 +1163,14 @@ function nextActionPanel(item) {
                   <input id="manualPlaceInput" type="text" value="${escapeHtml(state.manualPlace?.name || "")}" placeholder="商圈、地铁站、地址，比如静安寺" />
                   <button class="secondary-button" type="button" id="manualPlaceBtn">重新找</button>
                 </div>
+                ${
+                  state.locationSearchFailed
+                    ? `<div class="manual-place-actions">
+                        <button class="secondary-button" type="button" id="useCurrentLocationBtn">用当前位置找</button>
+                        ${liveEatOutFoods.length ? `<button class="secondary-button" type="button" id="returnPreviousBtn">返回刚才推荐</button>` : ""}
+                      </div>`
+                    : ""
+                }
               </div>`
             : ""
         }
@@ -1226,6 +1242,7 @@ function bindNextActions(item) {
         selectedId: "",
         refineOpen: false,
         locationOpen: false,
+        locationSearchFailed: false,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
         actionMessage: "",
@@ -1235,6 +1252,42 @@ function bindNextActions(item) {
         step: 6,
       });
       loadRestaurantsByPlace(keyword);
+    });
+  }
+
+  const useCurrentLocationButton = $("#useCurrentLocationBtn");
+  if (useCurrentLocationButton) {
+    useCurrentLocationButton.addEventListener("click", () => {
+      const nextBatch = (state.recommendationBatch || 0) + 1;
+      trackEvent("manual_place_use_current", { fromBatch: state.recommendationBatch || 0, toBatch: nextBatch });
+      setState({
+        selectedId: "",
+        refineOpen: false,
+        locationOpen: false,
+        locationSearchFailed: false,
+        manualPlace: null,
+        recommendationBatch: nextBatch,
+        restaurantMessage: "",
+        actionMessage: "",
+        shoppingList: [],
+        loadingTitle: "正在按当前位置重新找",
+        loadingDetail: "如果浏览器弹出定位提醒，请选择允许。",
+        step: 6,
+      });
+      loadNearbyRestaurants({ ignoreManualPlace: true });
+    });
+  }
+
+  const returnPreviousButton = $("#returnPreviousBtn");
+  if (returnPreviousButton) {
+    returnPreviousButton.addEventListener("click", () => {
+      trackEvent("manual_place_return_previous", { count: liveEatOutFoods.length });
+      setState({
+        locationOpen: false,
+        locationSearchFailed: false,
+        actionMessage: "",
+        restaurantMessage: "已回到刚才那组推荐。如果位置不准，也可以再换一个更具体的地名。",
+      });
     });
   }
 
