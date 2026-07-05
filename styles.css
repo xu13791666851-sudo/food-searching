@@ -879,6 +879,38 @@ p {
   font-size: 15px;
 }
 
+.manual-place-box {
+  display: grid;
+  gap: 8px;
+}
+
+.manual-place-box label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.manual-place-box > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.manual-place-box input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 11px;
+  border: 2px solid var(--line);
+  border-radius: 9px;
+  background: #fff8df;
+  color: var(--text);
+  font: inherit;
+}
+
+.manual-place-box button {
+  min-width: 86px;
+}
+
 .shopping-list {
   display: grid;
   gap: 9px;
