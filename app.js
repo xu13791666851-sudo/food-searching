@@ -19,6 +19,7 @@ const state = {
   restaurantMessage: "",
   actionMessage: "",
   shoppingList: [],
+  manualPlace: null,
 };
 
 const SAVED_DISH_KEY = "food-helper-saved-dishes";
@@ -384,6 +385,7 @@ function reset() {
     restaurantMessage: "",
     actionMessage: "",
     shoppingList: [],
+    manualPlace: null,
   });
   liveHomeFoods = [];
   liveEatOutFoods = [];
@@ -727,6 +729,14 @@ async function loadHomeRecipes() {
 }
 
 function loadNearbyRestaurants(options = {}) {
+  if (state.manualPlace && !options.ignoreManualPlace && !options.useTestLocation) {
+    fetchNearbyRestaurants(
+      { latitude: state.manualPlace.lat, longitude: state.manualPlace.lng, accuracy: 0 },
+      { manualPlace: state.manualPlace }
+    );
+    return;
+  }
+
   if (options.useTestLocation) {
     fetchNearbyRestaurants(
       { latitude: 31.22845773757727, longitude: 121.47822305927693, accuracy: 0 },
@@ -751,6 +761,32 @@ function loadNearbyRestaurants(options = {}) {
   );
 }
 
+async function loadRestaurantsByPlace(keyword) {
+  try {
+    const response = await fetch(`/api/geocode?keyword=${encodeURIComponent(keyword)}`);
+    const data = await response.json();
+
+    if (!response.ok || !data.ok || !data.place) {
+      throw new Error(data.message || "没有找到这个位置");
+    }
+
+    const place = data.place;
+    setState({ manualPlace: place });
+    trackEvent("manual_place_loaded", { keyword, placeName: place.name });
+    fetchNearbyRestaurants(
+      { latitude: place.lat, longitude: place.lng, accuracy: 0 },
+      { manualPlace: place }
+    );
+  } catch (error) {
+    trackEvent("manual_place_failed", { keyword, message: error.message });
+    setState({
+      actionMessage: `换位置失败：${error.message}`,
+      restaurantMessage: `没有找到“${keyword}”这个位置，可以换个更具体的地名。`,
+      step: 4,
+    });
+  }
+}
+
 async function fetchNearbyRestaurants(coords, options = {}) {
   try {
     const params = new URLSearchParams({
@@ -764,6 +800,9 @@ async function fetchNearbyRestaurants(coords, options = {}) {
       refine: state.refineReason,
       batch: String(state.recommendationBatch || 0),
     });
+    if (options.manualPlace) {
+      params.set("coord", "gcj02");
+    }
     const response = await fetch(`/api/restaurants?${params.toString()}`);
     const data = await response.json();
 
@@ -785,11 +824,12 @@ async function fetchNearbyRestaurants(coords, options = {}) {
     const accuracy = Number(data.accuracy || 0);
     const accuracyText = accuracy ? `，定位精度约 ${accuracy} 米` : "";
     const placeText = options.testLocation ? "测试位置附近" : "你附近的位置";
+    const searchPlaceText = options.manualPlace ? `${options.manualPlace.name}附近` : placeText;
     setState({
       selectedId: "",
       actionMessage: "",
       shoppingList: [],
-      restaurantMessage: `已根据${placeText}整理出 ${liveEatOutFoods.length} 个候选${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你排序" : ""}。距离和人均为高德参考值。`,
+      restaurantMessage: `已根据${searchPlaceText}整理出 ${liveEatOutFoods.length} 个候选${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你排序" : ""}。距离和人均为高德参考值。`,
       step: 4,
     });
   } catch (error) {
@@ -865,16 +905,18 @@ function renderLocationHelp() {
     trackEvent("retry_location", {});
     setState({
       restaurantMessage: "",
+      manualPlace: null,
       loadingTitle: "正在重新获取定位",
       loadingDetail: "如果浏览器弹出定位提醒，请选择允许。",
       step: 6,
     });
-    loadNearbyRestaurants();
+    loadNearbyRestaurants({ ignoreManualPlace: true });
   });
   $("#testLocationBtn").addEventListener("click", () => {
     trackEvent("use_test_location", {});
     setState({
       restaurantMessage: "",
+      manualPlace: null,
       loadingTitle: "正在用测试位置找餐厅",
       loadingDetail: "先用一个固定位置跑完整个真实餐厅流程。",
       step: 6,
@@ -1079,6 +1121,13 @@ function nextActionPanel(item) {
           <button class="primary-button" type="button" id="openAmapBtn">打开高德导航</button>
           <button class="secondary-button" type="button" id="copyAddressBtn">复制店名地址</button>
         </div>
+        <div class="manual-place-box">
+          <label for="manualPlaceInput">换个位置找</label>
+          <div>
+            <input id="manualPlaceInput" type="text" value="${escapeHtml(state.manualPlace?.name || "")}" placeholder="输入商圈、地铁站、地址，比如静安寺" />
+            <button class="secondary-button" type="button" id="manualPlaceBtn">重新找</button>
+          </div>
+        </div>
         ${state.actionMessage ? `<p class="form-message">${escapeHtml(state.actionMessage)}</p>` : ""}
       </section>
     `;
@@ -1128,6 +1177,33 @@ function bindNextActions(item) {
       setState({
         actionMessage: copied ? "店名和地址已复制，可以发给朋友或粘贴到地图里。" : "复制失败，可以手动复制店名和地址。",
       });
+    });
+  }
+
+  const manualPlaceButton = $("#manualPlaceBtn");
+  if (manualPlaceButton) {
+    manualPlaceButton.addEventListener("click", async () => {
+      const input = $("#manualPlaceInput");
+      const keyword = input ? input.value.trim() : "";
+      if (!keyword) {
+        setState({ actionMessage: "先输入一个商圈、地铁站或地址。" });
+        return;
+      }
+
+      const nextBatch = (state.recommendationBatch || 0) + 1;
+      trackEvent("submit_manual_place", { keyword, fromBatch: state.recommendationBatch || 0, toBatch: nextBatch });
+      setState({
+        selectedId: "",
+        refineOpen: false,
+        recommendationBatch: nextBatch,
+        restaurantMessage: "",
+        actionMessage: "",
+        shoppingList: [],
+        loadingTitle: "正在换位置重新找",
+        loadingDetail: `先定位到 ${keyword}，再找附近餐厅。`,
+        step: 6,
+      });
+      loadRestaurantsByPlace(keyword);
     });
   }
 
