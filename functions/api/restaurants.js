@@ -13,6 +13,7 @@ export async function onRequestGet(context) {
   const time = cleanText(url.searchParams.get("time"), 40);
   const note = cleanText(url.searchParams.get("note"), 200);
   const refine = cleanText(url.searchParams.get("refine"), 160);
+  const coord = cleanText(url.searchParams.get("coord"), 20);
   const batch = Math.max(0, Math.min(5, Number(url.searchParams.get("batch") || 0)));
 
   if (!context.env.AMAP_KEY) {
@@ -24,7 +25,7 @@ export async function onRequestGet(context) {
   }
 
   try {
-    const searchPoint = wgs84ToGcj02(lat, lng);
+    const searchPoint = coord === "gcj02" ? { lat, lng } : wgs84ToGcj02(lat, lng);
     const strictText = `${refine} ${note} ${taste} ${time} ${budget}`;
     const primary = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
       lat: searchPoint.lat,
