@@ -949,6 +949,17 @@ p {
   min-width: 86px;
 }
 
+.manual-place-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.manual-place-actions .secondary-button {
+  min-height: 40px;
+  font-size: 14px;
+}
+
 @media (min-width: 620px) {
   .result-tool-row {
     grid-template-columns: repeat(3, minmax(0, 1fr));
