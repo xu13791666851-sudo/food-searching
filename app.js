@@ -289,6 +289,39 @@ const eatOutFoods = [
     health: "85 分 · 低脂高蛋白",
     weather: "小雨天喝点热汤，会比干饭更舒服。",
   },
+  {
+    id: "out-rice-bowl",
+    name: "家常盖饭小馆",
+    source: "高德显示约 720m · 模拟店铺",
+    tag: "正餐",
+    reason: "米饭类、出餐快，适合想吃饱又不想纠结的时候。",
+    price: "参考人均 26 元",
+    time: "步行估算约 9 分钟",
+    health: "真实店铺 · 可再看评价",
+    weather: "热饭热菜适合小雨天，正餐感更强。",
+  },
+  {
+    id: "out-soup-rice",
+    name: "砂锅汤饭店",
+    source: "高德显示约 1.1km · 模拟店铺",
+    tag: "热汤",
+    reason: "汤汤水水、热乎，适合想吃舒服一点的时候。",
+    price: "参考人均 34 元",
+    time: "步行估算约 14 分钟",
+    health: "真实店铺 · 可再看评价",
+    weather: "雨天更适合有汤的正餐，吃完比较暖。",
+  },
+  {
+    id: "out-home-cooking",
+    name: "巷口家常菜",
+    source: "高德显示约 580m · 模拟店铺",
+    tag: "家常",
+    reason: "家常炒菜选择多，比咖啡甜品更像一顿正经饭。",
+    price: "参考人均 45 元",
+    time: "步行估算约 8 分钟",
+    health: "真实店铺 · 可再看评价",
+    weather: "适合想和朋友坐下来吃一顿。",
+  },
 ];
 
 const $ = (selector) => document.querySelector(selector);
@@ -738,7 +771,7 @@ async function fetchNearbyRestaurants(coords, options = {}) {
       throw new Error(data.message || "没有返回附近餐厅");
     }
 
-    liveEatOutFoods = data.restaurants.slice(0, 3);
+    liveEatOutFoods = data.restaurants.slice(0, 6);
     trackEvent("recommendation_loaded", {
       mode: "out",
       source: data.source || "unknown",
@@ -756,7 +789,7 @@ async function fetchNearbyRestaurants(coords, options = {}) {
       selectedId: "",
       actionMessage: "",
       shoppingList: [],
-      restaurantMessage: `已根据${placeText}找到 ${liveEatOutFoods.length} 家真实餐厅${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你重新排序" : ""}。`,
+      restaurantMessage: `已根据${placeText}整理出 ${liveEatOutFoods.length} 个候选${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你排序" : ""}。距离和人均为高德参考值。`,
       step: 4,
     });
   } catch (error) {
