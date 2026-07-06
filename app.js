@@ -9,6 +9,10 @@ const state = {
   health: "",
   aiNote: "",
   aiIntentSummary: "",
+  agentDraft: "",
+  agentReply: "",
+  agentContext: "",
+  agentBusy: false,
   refineOpen: false,
   locationOpen: false,
   locationSearchFailed: false,
@@ -378,6 +382,10 @@ function reset() {
     health: "",
     aiNote: "",
     aiIntentSummary: "",
+    agentDraft: "",
+    agentReply: "",
+    agentContext: "",
+    agentBusy: false,
     refineOpen: false,
     locationOpen: false,
     locationSearchFailed: false,
@@ -417,10 +425,18 @@ function renderScene() {
   updateShell("scene");
   $("#workspace").innerHTML = `
     <div class="section-title">
-      <p class="eyebrow">先分清场景</p>
-      <h2>你今天准备怎么吃？</h2>
-      <p class="muted-line">朋友试用版：少问几步，直接帮你把选择变少。</p>
+      <p class="eyebrow">Agent 先理解</p>
+      <h2>今天这顿，你想怎么吃？</h2>
+      <p class="muted-line">直接告诉我一句话，我会判断要不要追问，然后帮你找餐厅或想菜。</p>
     </div>
+    <section class="agent-entry-card">
+      <label for="agentInput">直接告诉我</label>
+      <textarea id="agentInput" rows="4" placeholder="比如：外面吃，60-100，可以远一点，不要商场。">${escapeHtml(state.agentDraft)}</textarea>
+      ${state.agentReply ? `<div class="agent-reply">${escapeHtml(state.agentReply)}</div>` : ""}
+      <div class="agent-entry-actions">
+        <button class="primary-button" type="button" id="agentSendBtn">${state.agentBusy ? "正在理解..." : "让 Agent 帮我找"}</button>
+      </div>
+    </section>
     <div class="taste-strip">
       <span>小雨天</span>
       <span>热乎一点</span>
@@ -439,6 +455,17 @@ function renderScene() {
       </button>
     </div>
   `;
+  const input = $("#agentInput");
+  const sendButton = $("#agentSendBtn");
+  if (input) {
+    input.addEventListener("input", () => {
+      state.agentDraft = input.value;
+    });
+  }
+  if (sendButton) {
+    sendButton.disabled = state.agentBusy;
+    sendButton.addEventListener("click", () => submitAgentMessage());
+  }
   document.querySelectorAll("[data-mode]").forEach((button) => {
     button.addEventListener("click", () => {
       const mode = button.dataset.mode;
@@ -459,6 +486,171 @@ function renderScene() {
       });
     });
   });
+}
+
+async function submitAgentMessage() {
+  const input = $("#agentInput");
+  const message = input ? input.value.trim() : state.agentDraft.trim();
+  if (!message || state.agentBusy) {
+    setState({ agentReply: "先告诉我一句你大概想怎么吃。" });
+    return;
+  }
+
+  const combinedMessage = [state.agentContext, message].filter(Boolean).join("。");
+  setState({ agentBusy: true, agentDraft: message, agentReply: "我先理解一下你的意思..." });
+
+  try {
+    const decision = await getAgentDecision(combinedMessage);
+    if (decision.action === "ask") {
+      trackEvent("agent_ask", {
+        message,
+        reply: decision.reply,
+        missing: decision.missing || [],
+      });
+      setState({
+        agentBusy: false,
+        agentDraft: "",
+        agentContext: combinedMessage,
+        agentReply: decision.reply || "还差一点信息，你想在家吃还是外面吃？",
+      });
+      return;
+    }
+
+    startAgentRecommendation(decision, combinedMessage);
+  } catch (error) {
+    setState({
+      agentBusy: false,
+      agentReply: "我刚才没理解成功。你可以换句话说，或者先点下面的在家吃/外面吃。",
+    });
+  }
+}
+
+async function getAgentDecision(message) {
+  try {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+    const data = await response.json();
+    if (response.ok && data && data.ok) return data;
+  } catch {
+    // 本地直接打开 HTML 时没有后端，先用浏览器里的轻量理解兜底。
+  }
+  return localAgentDecision(message);
+}
+
+function startAgentRecommendation(decision, originalMessage) {
+  const mode = decision.mode === "home" ? "home" : "out";
+  const profile = preferenceProfiles[mode];
+  const preferences = normalizeAgentPreferences(decision.preferences || {}, profile);
+  const reply = decision.reply || buildAiIntentSummary({ mode, note: originalMessage, preferences, inferred: preferences });
+
+  if (mode === "out") {
+    liveEatOutFoods = [];
+  } else {
+    liveHomeFoods = [];
+  }
+
+  setState({
+    mode,
+    homeSource: mode === "home" ? "new" : "",
+    mood: preferences.mood,
+    taste: preferences.taste,
+    time: preferences.time,
+    budget: preferences.budget,
+    health: preferences.health,
+    aiNote: originalMessage,
+    aiIntentSummary: reply,
+    agentBusy: false,
+    agentDraft: "",
+    agentReply: "",
+    agentContext: "",
+    refineOpen: false,
+    refineReason: "",
+    recommendationBatch: 0,
+    restaurantMessage: "",
+    actionMessage: "",
+    shoppingList: [],
+    loadingTitle: mode === "out" ? "AI 正在理解并找附近餐厅" : "AI 正在理解今天想吃什么",
+    loadingDetail: reply,
+    step: 6,
+  });
+
+  trackEvent("agent_recommend", {
+    mode,
+    message: originalMessage,
+    preferences,
+    reply,
+  });
+
+  if (mode === "out") {
+    loadNearbyRestaurants();
+  } else {
+    loadHomeRecipes();
+  }
+}
+
+function normalizeAgentPreferences(preferences, profile) {
+  const result = {};
+  for (const group of profile.groups) {
+    result[group.key] = group.options.includes(preferences[group.key])
+      ? preferences[group.key]
+      : defaultPreference(profile, group.key);
+  }
+  return result;
+}
+
+function localAgentDecision(message) {
+  const text = String(message || "");
+  const mode = inferAgentMode(text);
+  if (!mode) {
+    return {
+      ok: true,
+      action: "ask",
+      missing: ["mode"],
+      reply: "你想在家吃还是外面吃？如果外面吃，我可以按当前位置找真实餐厅。",
+    };
+  }
+
+  const profile = preferenceProfiles[mode];
+  const inferred = inferPreferencesFromText(text, profile, mode);
+  const acceptsDefaults = /没有|无所谓|随便|都行|默认|你定|帮我定/i.test(text);
+  if (mode === "out" && acceptsDefaults) {
+    if (!inferred.budget) inferred.budget = "30-60 元";
+    if (!inferred.time) inferred.time = "15 分钟内";
+  }
+  if (mode === "out" && !inferred.budget && !inferred.time && !acceptsDefaults) {
+    return {
+      ok: true,
+      action: "ask",
+      mode,
+      missing: ["budget", "time"],
+      reply: "预算和距离有没有要求？没有的话，我先按 30-60、15 分钟内找。",
+    };
+  }
+
+  const preferences = {
+    mood: inferred.mood || defaultPreference(profile, "mood"),
+    taste: inferred.taste || defaultPreference(profile, "taste"),
+    time: inferred.time || defaultPreference(profile, "time"),
+    budget: inferred.budget || defaultPreference(profile, "budget"),
+    health: inferred.health || defaultPreference(profile, "health"),
+  };
+
+  return {
+    ok: true,
+    action: "recommend",
+    mode,
+    preferences,
+    reply: buildAiIntentSummary({ mode, note: text, preferences, inferred }),
+  };
+}
+
+function inferAgentMode(text) {
+  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均/i.test(text)) return "out";
+  if (/在家|家里|做饭|菜谱|自己做|冰箱|买菜|厨房/i.test(text)) return "home";
+  return "";
 }
 
 function renderHomeSource() {
@@ -719,7 +911,7 @@ function inferPreferencesFromText(text, profile, mode) {
     else if (has(/近一点|最近|越近越好|不想走/i)) inferred.time = "越近越好";
 
     if (has(/米饭|盖饭|炒饭|饭类/i)) inferred.taste = "米饭类";
-    else if (has(/面|粉|米线/i)) inferred.taste = "面食类";
+    else if (has(/面条|面食|拉面|拌面|粉|米线/i)) inferred.taste = "面食类";
     else if (has(/汤|热汤|汤汤水水/i)) inferred.taste = "汤汤水水";
     else if (has(/清淡|不辣|不要辣|少油/i)) inferred.taste = "清淡点";
     else if (has(/辣|重口|川菜|湘菜/i)) inferred.taste = "重口味";
