@@ -1,147 +1,45 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>反馈看板 | 今天吃什么</title>
-  <link rel="stylesheet" href="admin.css" />
-</head>
-<body>
-  <main class="dashboard-shell">
-    <section class="hero-panel">
-      <div class="brand-mark">食</div>
-      <p class="eyebrow">反馈看板</p>
-      <h1>朋友试用后，结果都在这里。</h1>
-      <p class="hero-copy">输入你的后台 token，查看推荐结果是否真的帮朋友做了决定。</p>
-    </section>
-
-    <section class="control-panel">
-      <label for="tokenInput">后台 token</label>
-      <div class="token-row">
-        <input id="tokenInput" type="password" placeholder="输入 FEEDBACK_ADMIN_TOKEN" autocomplete="off" />
-        <button id="loadButton" type="button">查看反馈</button>
-      </div>
-      <p id="statusText" class="status-text">token 只会保存在当前浏览器里，方便你下次查看。</p>
-    </section>
-
-    <section class="metric-grid" aria-label="反馈概览">
-      <article class="metric-card">
-        <span>反馈总数</span>
-        <strong id="totalCount">0</strong>
-      </article>
-      <article class="metric-card">
-        <span>愿意吃</span>
-        <strong id="eatRate">-</strong>
-      </article>
-      <article class="metric-card">
-        <span>觉得准</span>
-        <strong id="accuracyRate">-</strong>
-      </article>
-      <article class="metric-card">
-        <span>流程轻松</span>
-        <strong id="flowRate">-</strong>
-      </article>
-    </section>
-
-    <section class="metric-grid" aria-label="使用概览">
-      <article class="metric-card usage-card">
-        <span>使用次数</span>
-        <strong id="sessionCount">0</strong>
-      </article>
-      <article class="metric-card usage-card">
-        <span>推荐生成</span>
-        <strong id="recommendationCount">0</strong>
-      </article>
-      <article class="metric-card usage-card">
-        <span>换一批</span>
-        <strong id="refreshCount">0</strong>
-      </article>
-      <article class="metric-card usage-card">
-        <span>不满意重筛</span>
-        <strong id="refineCount">0</strong>
-      </article>
-    </section>
-
-    <section class="insight-grid">
-      <article class="insight-card">
-        <div class="section-heading">
-          <p class="eyebrow">选择意愿</p>
-          <h2>会不会吃</h2>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent 对话 · 今天吃什么</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell agent-shell">
+      <header class="hero agent-hero">
+        <div class="brand-row">
+          <span class="brand-mark">食</span>
+          <div>
+            <strong>今天吃什么</strong>
+            <small>Agent 对话版</small>
+          </div>
         </div>
-        <div id="choiceChart" class="bar-list"></div>
-      </article>
-
-      <article class="insight-card">
-        <div class="section-heading">
-          <p class="eyebrow">推荐质量</p>
-          <h2>准不准</h2>
+        <div class="agent-hero-status">
+          <span>上海 · 小雨 · 24°C</span>
+          <span>对话推进</span>
         </div>
-        <div id="accuracyChart" class="bar-list"></div>
-      </article>
+        <h1 class="hero-title">
+          <span>先聊天</span>
+          <span>再帮你定</span>
+        </h1>
+        <p id="assistantLine">你说一句，我来判断是在家吃还是外面吃。</p>
+      </header>
 
-      <article class="insight-card">
-        <div class="section-heading">
-          <p class="eyebrow">使用感受</p>
-          <h2>流程体验</h2>
+      <section class="progress-wrap" aria-label="Agent 进度">
+        <div class="progress-meta">
+          <strong id="stepTitle">Agent 对话</strong>
+          <span id="stepHint">选项只是快捷回复</span>
         </div>
-        <div id="flowChart" class="bar-list"></div>
-      </article>
-
-      <article class="insight-card">
-        <div class="section-heading">
-          <p class="eyebrow">热门结果</p>
-          <h2>被反馈最多</h2>
+        <div class="progress-track">
+          <span id="progressBar"></span>
         </div>
-        <div id="targetChart" class="bar-list"></div>
-      </article>
+      </section>
 
-      <article class="insight-card">
-        <div class="section-heading">
-          <p class="eyebrow">使用路径</p>
-          <h2>在家还是外面</h2>
-        </div>
-        <div id="modeChart" class="bar-list"></div>
-      </article>
+      <section class="workspace agent-workspace" id="workspace" aria-live="polite"></section>
+    </main>
 
-      <article class="insight-card">
-        <div class="section-heading">
-          <p class="eyebrow">最终选择</p>
-          <h2>朋友选了什么</h2>
-        </div>
-        <div id="selectionChart" class="bar-list"></div>
-      </article>
-
-      <article class="insight-card">
-        <div class="section-heading">
-          <p class="eyebrow">不满意原因</p>
-          <h2>哪里不对</h2>
-        </div>
-        <div id="refineChart" class="bar-list"></div>
-      </article>
-
-      <article class="insight-card">
-        <div class="section-heading">
-          <p class="eyebrow">AI 状态</p>
-          <h2>推荐是否成功</h2>
-        </div>
-        <div id="aiChart" class="bar-list"></div>
-      </article>
-    </section>
-
-    <section class="feedback-list-panel">
-      <div class="section-heading row-heading">
-        <div>
-          <p class="eyebrow">原始反馈</p>
-          <h2>朋友具体说了什么</h2>
-        </div>
-        <button id="copyCsvButton" class="ghost-button" type="button">复制表格</button>
-      </div>
-      <div id="feedbackList" class="feedback-list">
-        <p class="empty-state">还没有加载反馈。</p>
-      </div>
-    </section>
-  </main>
-
-  <script src="admin.js"></script>
-</body>
+    <script src="agent.js"></script>
+  </body>
 </html>
