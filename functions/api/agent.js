@@ -76,7 +76,7 @@ function decide(message) {
 }
 
 function inferMode(text) {
-  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均/i.test(text)) return "out";
+  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均|日料|日本料理|寿司|刺身|韩餐|韩国料理|火锅|烧烤|烤肉|轻食|沙拉|粤菜|川菜|湘菜/i.test(text)) return "out";
   if (/在家|家里|做饭|菜谱|自己做|冰箱|买菜|厨房/i.test(text)) return "home";
   return "";
 }
@@ -164,9 +164,21 @@ function pick(value, options) {
 function buildReply(message, mode, preferences) {
   if (mode === "out") {
     const extra = buildConstraintSummary(message);
-    return `我理解你想找外面吃、人均 ${preferences.budget}、${preferences.time}、偏向${preferences.taste}${extra ? `，并且要避开${extra}` : ""}。我现在帮你找真实餐厅。`;
+    const category = targetCategorySummary(message);
+    return `我理解你想找外面吃${category ? `，想吃${category}` : ""}，人均 ${preferences.budget}、${preferences.time}、偏向${preferences.taste}${extra ? `，并且要避开${extra}` : ""}。我现在帮你找真实餐厅。`;
   }
   return `我理解你想在家吃，偏向${preferences.taste}、${preferences.time}、预算${preferences.budget}。我现在帮你想可执行的菜。`;
+}
+
+function targetCategorySummary(message) {
+  if (/日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i.test(message)) return "日料";
+  if (/韩餐|韩国料理|韩式|部队锅|石锅|拌饭/i.test(message)) return "韩餐";
+  if (/火锅|涮锅|锅底|串串/i.test(message)) return "火锅";
+  if (/烧烤|烤肉|烤串|烤鱼/i.test(message)) return "烧烤/烤肉";
+  if (/粤菜|茶餐厅|港式|烧腊/i.test(message)) return "粤菜/港式";
+  if (/川菜|湘菜|麻辣|冒菜|酸菜鱼/i.test(message)) return "川湘/麻辣";
+  if (/轻食|沙拉|健康餐|健身餐|低脂|低卡/i.test(message)) return "轻食健康餐";
+  return "";
 }
 
 function buildConstraintSummary(message) {
