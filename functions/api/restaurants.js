@@ -683,6 +683,7 @@ function radiusFromPreference(text) {
   if (Number.isFinite(explicitDistance)) return String(Math.min(Math.max(explicitDistance, 500), 10000));
   if (text.includes("越近越好") || text.includes("再近") || text.includes("近一点")) return "1200";
   if (text.includes("15 分钟内")) return "1800";
+  if (/扩大范围|多给几个|选择太少|不同类型/.test(String(text || ""))) return "7000";
   if (wantsFarther(text)) return "6000";
   return "3000";
 }
