@@ -27,6 +27,7 @@ export async function onRequestGet(context) {
   try {
     const searchPoint = coord === "gcj02" ? { lat, lng } : wgs84ToGcj02(lat, lng);
     const strictText = `${refine} ${note} ${taste} ${time} ${budget}`;
+    const wantsWiderSearch = wantsFarther(strictText);
     const primary = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
       lat: searchPoint.lat,
       lng: searchPoint.lng,
@@ -34,7 +35,7 @@ export async function onRequestGet(context) {
       radius: radiusFromPreference(strictText),
       offset: "25",
       pageStart: batch * 2 + 1,
-      pages: 2,
+      pages: wantsWiderSearch ? 4 : 2,
     });
 
     const result = primary.pois.length
@@ -71,7 +72,7 @@ export async function onRequestGet(context) {
           : refinedCandidates.length >= 6
             ? refinedCandidates
             : mealCandidates;
-    const restaurants = candidatePois
+    const restaurants = sortPoisForPreference(candidatePois, { taste, budget, time, note, refine })
       .slice(0, 18)
       .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note, refine }));
 
@@ -84,11 +85,12 @@ export async function onRequestGet(context) {
     }
 
     const aiResult = await applyAiRecommendation(context.env, restaurants, { taste, budget, time, note, refine });
+    const orderedRestaurants = sortRestaurantsForPreference(aiResult.restaurants, { taste, budget, time, note, refine });
 
     return json({
       ok: true,
       source: "amap",
-      restaurants: aiResult.restaurants,
+      restaurants: orderedRestaurants,
       ai: aiResult.used,
       aiStatus: aiResult.status,
       searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
@@ -259,11 +261,16 @@ function buildAiMessages(restaurants, preference) {
     {
       role: "user",
       content: JSON.stringify({
-              task: "请从候选餐厅里选出最适合今天的 6 家，并给出简短推荐理由。只返回 JSON，不要 Markdown。",
-              refinement_rule: preference.refine
-                ? `用户刚才不满意的原因是：${preference.refine}。这次必须优先避开这个问题。`
-                : "这是第一次推荐，按用户偏好和真实餐厅事实排序。",
-              output_format: {
+        task: "请从候选餐厅里选出最适合今天的 6 家，并给出简短推荐理由。只返回 JSON，不要 Markdown。",
+        ranking_rules: [
+          "预算区间是强优先条件。比如用户选 60-100 元，就优先选择人均 60-100 元的餐厅，不要把 60 元以下餐厅排在前面，除非候选里没有足够选择。",
+          "距离/时间也要尊重。用户选“可以走远点”时，不要只按最近排序，可以为了更匹配的价格、口味、评分选择稍远的店。",
+          "如果餐厅价格、距离、口味不符合用户选择，理由里必须诚实说明，不要硬说合适。",
+        ],
+        refinement_rule: preference.refine
+          ? `用户刚才不满意的原因是：${preference.refine}。这次必须优先避开这个问题。`
+          : "这是第一次推荐，按用户偏好和真实餐厅事实排序。",
+        output_format: {
           picks: [
             {
               id: "餐厅 id，必须来自候选列表",
@@ -278,8 +285,11 @@ function buildAiMessages(restaurants, preference) {
           category: item.tag,
           source: item.source,
           price: item.price,
+          averageCost: item.cost || 0,
           time: item.time,
+          distanceMeters: item.distance || 0,
           rating: item.health,
+          match: item.match || "",
           address: item.address,
           currentReason: item.reason,
         })),
@@ -315,6 +325,7 @@ function formatRestaurant(poi, index, preference) {
   const cost = poi.biz_ext && poi.biz_ext.cost && poi.biz_ext.cost !== "[]" ? poi.biz_ext.cost : "";
   const type = String(poi.type || "餐饮").split(";").slice(-1)[0] || "餐饮";
   const image = getPoiPhoto(poi);
+  const numericCost = Number(cost || 0);
 
   return {
     id: `amap-${poi.id || index}`,
@@ -331,6 +342,8 @@ function formatRestaurant(poi, index, preference) {
     address: cleanText(poi.address, 80),
     location: cleanText(poi.location, 60),
     distance,
+    cost: Number.isFinite(numericCost) ? numericCost : 0,
+    match: describeMatch({ cost: numericCost, distance, poi, preference }),
   };
 }
 
@@ -412,15 +425,17 @@ function extractMaxNumber(text, unit) {
 function isBudgetReasonable(poi, budget, refine = "") {
   const cost = Number(costValue(poi));
   if (!Number.isFinite(cost) || cost <= 0) return true;
-  const max = budgetMax(budget);
-  if (refine.includes("太贵")) return cost <= max;
+  const range = budgetRange(budget);
+  if (refine.includes("太贵")) return cost <= range.max;
+  if (range.strictMin > 0 && cost < range.strictMin) return false;
+  if (Number.isFinite(range.max) && cost > range.max) return false;
   if (budget.includes("30 元内")) return cost <= 40;
-  if (budget.includes("30-60")) return cost <= 80;
-  if (budget.includes("60-100")) return cost <= 130;
+  if (budget.includes("30-60")) return cost >= 25 && cost <= 80;
+  if (budget.includes("60-100")) return cost >= 60 && cost <= 120;
   if (budget.includes("贵点")) return true;
   if (budget.includes("20 元内")) return cost <= 35;
-  if (budget.includes("20-40")) return cost <= 70;
-  if (budget.includes("40-60")) return cost <= 110;
+  if (budget.includes("20-40")) return cost >= 15 && cost <= 55;
+  if (budget.includes("40-60")) return cost >= 40 && cost <= 80;
   return true;
 }
 
@@ -443,6 +458,115 @@ function budgetMax(budget) {
   if (budget.includes("20-40")) return 45;
   if (budget.includes("40-60")) return 70;
   return 80;
+}
+
+function budgetRange(budget) {
+  if (budget.includes("30 元内")) return { min: 0, strictMin: 0, max: 40, idealMin: 0, idealMax: 35 };
+  if (budget.includes("30-60")) return { min: 25, strictMin: 25, max: 80, idealMin: 30, idealMax: 60 };
+  if (budget.includes("60-100")) return { min: 60, strictMin: 60, max: 120, idealMin: 60, idealMax: 100 };
+  if (budget.includes("贵点")) return { min: 0, strictMin: 0, max: 260, idealMin: 80, idealMax: 180 };
+  if (budget.includes("20 元内")) return { min: 0, strictMin: 0, max: 35, idealMin: 0, idealMax: 20 };
+  if (budget.includes("20-40")) return { min: 15, strictMin: 15, max: 55, idealMin: 20, idealMax: 40 };
+  if (budget.includes("40-60")) return { min: 40, strictMin: 40, max: 80, idealMin: 40, idealMax: 60 };
+  return { min: 0, strictMin: 0, max: Infinity, idealMin: 0, idealMax: Infinity };
+}
+
+function sortPoisForPreference(pois, preference) {
+  return [...pois].sort((a, b) => preferenceScoreForPoi(b, preference) - preferenceScoreForPoi(a, preference));
+}
+
+function sortRestaurantsForPreference(restaurants, preference) {
+  return [...restaurants].sort((a, b) => preferenceScoreForRestaurant(b, preference) - preferenceScoreForRestaurant(a, preference));
+}
+
+function preferenceScoreForPoi(poi, preference) {
+  const text = `${preference.refine || ""} ${preference.note || ""} ${preference.time || ""}`;
+  const cost = Number(costValue(poi));
+  const distance = Number(poi.distance || 0);
+  const rating = Number(ratingValue(poi));
+  let score = 0;
+
+  score += budgetScore(cost, preference.budget);
+  score += distanceScore(distance, text);
+  if (matchesTaste(poi, preference.taste)) score += 22;
+  if (isProperMealText(`${poi.name || ""} ${poi.type || ""}`)) score += 12;
+  if (Number.isFinite(rating)) score += Math.max(0, rating - 3.5) * 8;
+
+  return score;
+}
+
+function preferenceScoreForRestaurant(item, preference) {
+  const text = `${preference.refine || ""} ${preference.note || ""} ${preference.time || ""}`;
+  const cost = Number(item.cost || 0);
+  const distance = Number(item.distance || 0);
+  let score = 0;
+
+  score += budgetScore(cost, preference.budget);
+  score += distanceScore(distance, text);
+  if (item.match && item.match.includes("预算命中")) score += 18;
+  if (item.match && item.match.includes("口味接近")) score += 12;
+  if (/高德评分\s*4\.[5-9]|高德评分\s*5/.test(item.health || "")) score += 10;
+
+  return score;
+}
+
+function budgetScore(cost, budget) {
+  if (!Number.isFinite(cost) || cost <= 0) return 4;
+  const range = budgetRange(budget);
+
+  if (budget.includes("贵点")) {
+    if (cost >= range.idealMin && cost <= range.idealMax) return 42;
+    if (cost < 60) return 0;
+    return 20;
+  }
+
+  if (cost >= range.idealMin && cost <= range.idealMax) return 70;
+  if (range.strictMin > 0 && cost < range.strictMin) return -70 - Math.round((range.strictMin - cost) / 3);
+  if (Number.isFinite(range.max) && cost > range.max) return -50 - Math.round((cost - range.max) / 5);
+  if (cost >= range.min && cost <= range.max) return 38;
+  return 0;
+}
+
+function distanceScore(distance, preferenceText) {
+  if (!Number.isFinite(distance) || distance <= 0) return 0;
+  const explicitDistance = extractMaxNumber(preferenceText, "米");
+  if (Number.isFinite(explicitDistance)) return distance <= explicitDistance ? 28 : -60;
+
+  if (preferenceText.includes("越近越好") || preferenceText.includes("近一点") || preferenceText.includes("再近") || preferenceText.includes("更近")) {
+    if (distance <= 900) return 34;
+    return -45 - Math.round((distance - 900) / 150);
+  }
+
+  if (preferenceText.includes("15 分钟内")) {
+    if (distance <= 1500) return 26;
+    return -35 - Math.round((distance - 1500) / 200);
+  }
+
+  if (wantsFarther(preferenceText)) {
+    if (distance >= 600 && distance <= 3500) return 22;
+    if (distance < 300) return 2;
+    if (distance <= 5000) return 12;
+    return -18;
+  }
+
+  if (distance <= 1000) return 18;
+  if (distance <= 2500) return 10;
+  return -8;
+}
+
+function describeMatch({ cost, distance, poi, preference }) {
+  const parts = [];
+  const range = budgetRange(preference.budget);
+  if (Number.isFinite(cost) && cost > 0) {
+    if (cost >= range.idealMin && cost <= range.idealMax) parts.push("预算命中");
+    else if (range.strictMin > 0 && cost < range.strictMin) parts.push("低于预算区间");
+    else if (Number.isFinite(range.max) && cost > range.max) parts.push("高于预算区间");
+  }
+  if (matchesTaste(poi, preference.taste)) parts.push("口味接近");
+  if (wantsFarther(`${preference.time || ""} ${preference.note || ""} ${preference.refine || ""}`)) {
+    parts.push(distance >= 600 ? "可接受稍远" : "距离很近但不是唯一依据");
+  }
+  return parts.join(" · ");
 }
 
 function buildReason(poi, preference, minutes) {
@@ -510,7 +634,9 @@ function priceReason(cost, budget) {
   if (!Number.isFinite(price)) return "";
   if (budget.includes("30 元内") && price > 35) return `高德参考人均 ${price} 元，可能略超预算`;
   if (budget.includes("30-60") && price >= 25 && price <= 70) return `高德参考人均 ${price} 元，和预算比较贴近`;
-  if (budget.includes("60-100") && price >= 50 && price <= 120) return `高德参考人均 ${price} 元，和预算比较贴近`;
+  if (budget.includes("60-100") && price >= 60 && price <= 100) return `高德参考人均 ${price} 元，正好在预算区间`;
+  if (budget.includes("60-100") && price < 60) return `高德参考人均 ${price} 元，低于你选的预算区间`;
+  if (budget.includes("60-100") && price > 100) return `高德参考人均 ${price} 元，可能略超预算`;
   if (budget.includes("20 元内") && price > 25) return `高德参考人均 ${price} 元，可能略超预算`;
   if (budget.includes("20-40") && price >= 15 && price <= 45) return `高德参考人均 ${price} 元，和预算比较贴近`;
   if (budget.includes("40-60") && price >= 30 && price <= 70) return `高德参考人均 ${price} 元，和预算比较贴近`;
@@ -557,8 +683,12 @@ function radiusFromPreference(text) {
   if (Number.isFinite(explicitDistance)) return String(Math.min(Math.max(explicitDistance, 500), 10000));
   if (text.includes("越近越好") || text.includes("再近") || text.includes("近一点")) return "1200";
   if (text.includes("15 分钟内")) return "1800";
-  if (text.includes("可以走远点")) return "5000";
+  if (wantsFarther(text)) return "6000";
   return "3000";
+}
+
+function wantsFarther(text) {
+  return /可以走远点|走远点|远一点|远点|远一些|不介意远|远一点也行|稍微远/.test(String(text || ""));
 }
 
 function priceFromBudget(budget) {
