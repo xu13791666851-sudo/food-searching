@@ -779,6 +779,18 @@ function buildAiIntentSummary({ mode, note, preferences, inferred }) {
   return parts.join("。") + "。";
 }
 
+function refineInstructionFromReason(reason) {
+  const map = {
+    价格不对: "预算不匹配，优先按我选的预算区间，不要推荐明显低于或高于预算的店",
+    距离不对: "距离不符合预期，重新按我选的距离偏好筛",
+    不像正餐: "要正餐饱腹，不要咖啡甜品饮品小吃凑数",
+    口味不对: "不想吃这个口味，换一种更贴近我需求的餐厅",
+    环境不合适: "环境要更适合坐下来吃，别只看距离",
+    选择太少: "选择太少，扩大范围多给几个不同类型的正餐选择",
+  };
+  return map[reason] || reason;
+}
+
 function quickSelect(key, label, options) {
   return `
     <div class="quick-select">
@@ -1181,15 +1193,24 @@ function renderResult() {
     followupSubmitButton.addEventListener("click", () => {
       const input = $("#followupInput");
       const message = input ? input.value.trim() : "";
+      const checkedReasons = Array.from(document.querySelectorAll("[data-refine-check].selected")).map((button) => button.dataset.refineCheck);
+      const reasonInstructions = checkedReasons.map(refineInstructionFromReason);
+      const combinedMessage = [...reasonInstructions, message].filter(Boolean).join("，");
       if (!message) {
-        setState({ actionMessage: "先告诉我一句你想换的方向。" });
+        if (!checkedReasons.length) {
+          setState({ actionMessage: "先点一个原因，或者告诉我一句你想换的方向。" });
+          return;
+        }
+      }
+      if (!combinedMessage) {
         return;
       }
       const nextBatch = (state.recommendationBatch || 0) + 1;
       liveEatOutFoods = [];
       trackEvent("submit_followup", {
         mode: "out",
-        message,
+        message: combinedMessage,
+        checkedReasons,
         fromBatch: state.recommendationBatch || 0,
         toBatch: nextBatch,
       });
@@ -1198,19 +1219,41 @@ function renderResult() {
         refineOpen: false,
         locationOpen: false,
         locationSearchFailed: false,
-        refineReason: message,
-        aiIntentSummary: `收到你的补充：“${message}”。这次我会带着这个新要求重新筛附近餐厅。`,
+        refineReason: combinedMessage,
+        aiIntentSummary: `收到你的补充：“${combinedMessage}”。这次我会带着这个新要求重新筛附近餐厅。`,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
         actionMessage: "",
         shoppingList: [],
         loadingTitle: "正在按你的话重新找",
-        loadingDetail: `收到：${message}。这次会带着这句话重新筛。`,
+        loadingDetail: `收到：${combinedMessage}。这次会带着这句话重新筛。`,
         step: 6,
       });
       loadNearbyRestaurants();
     });
   }
+  const closeRefineButton = $("#closeRefineBtn");
+  if (closeRefineButton) {
+    closeRefineButton.addEventListener("click", () => {
+      trackEvent("close_refine", { mode: state.mode, homeSource: state.homeSource });
+      setState({ refineOpen: false, actionMessage: "" });
+    });
+  }
+  document.querySelectorAll("[data-refine-check]").forEach((button) => {
+    button.addEventListener("click", () => {
+      button.classList.toggle("selected");
+      const selectedReasons = Array.from(document.querySelectorAll("[data-refine-check].selected")).map((item) => item.dataset.refineCheck);
+      trackEvent("toggle_refine_reason", {
+        mode: state.mode,
+        reason: button.dataset.refineCheck,
+        selected: button.classList.contains("selected"),
+      });
+      const input = $("#followupInput");
+      if (input && selectedReasons.length && !input.value.trim()) {
+        input.placeholder = `我先记下：${selectedReasons.join("、")}。你也可以再补一句，比如“但环境要好一点”。`;
+      }
+    });
+  });
   document.querySelectorAll("[data-refine-reason]").forEach((button) => {
     button.addEventListener("click", () => {
       const nextBatch = (state.recommendationBatch || 0) + 1;
@@ -1251,8 +1294,30 @@ function renderResult() {
 function refinePanel() {
   const reasons =
     state.mode === "out"
-      ? ["太贵", "太远", "不像正餐", "不想吃这个口味", "换轻一点"]
+      ? ["价格不对", "距离不对", "不像正餐", "口味不对", "环境不合适", "选择太少"]
       : ["太麻烦", "没食材", "太油", "太清淡", "换个口味"];
+  if (state.mode === "out") {
+    return `
+      <section class="refine-panel simple-block ai-refine-panel">
+        <div class="ai-refine-head">
+          <span class="ai-badge">AI 追问</span>
+          <h3>这几个不太对，是哪里不对？</h3>
+          <p class="muted-line">你可以点原因，也可以直接说一句。我会把这些反馈带进下一轮推荐。</p>
+        </div>
+        <div class="refine-options reason-grid">
+          ${reasons
+            .map((reason) => `<button class="mini-chip ${state.refineReason.includes(reason) ? "selected" : ""}" type="button" data-refine-check="${reason}">${reason}</button>`)
+            .join("")}
+        </div>
+        <textarea class="ai-note-input" id="followupInput" rows="3" placeholder="比如：预算 60-100，可以远一点；不要商场，想吃正餐。">${escapeHtml(state.refineReason)}</textarea>
+        <div class="action-row">
+          <button class="secondary-button" type="button" id="closeRefineBtn">先不改了</button>
+          <button class="primary-button" type="button" id="followupSubmitBtn">让 AI 重新筛</button>
+        </div>
+        ${state.actionMessage ? `<p class="form-message">${escapeHtml(state.actionMessage)}</p>` : ""}
+      </section>
+    `;
+  }
   return `
     <section class="refine-panel simple-block">
       <h3>${state.mode === "out" ? "继续跟我说" : "哪里不对？"}</h3>
