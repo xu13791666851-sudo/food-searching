@@ -245,6 +245,54 @@ p {
   font-weight: 700;
 }
 
+.agent-entry-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 2px solid var(--text);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 6px 6px 0 rgba(36, 31, 27, 0.12);
+}
+
+.agent-entry-card label {
+  color: var(--tomato);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.agent-entry-card textarea {
+  width: 100%;
+  min-height: 104px;
+  resize: vertical;
+  padding: 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  background: #fffaf4;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.agent-entry-card textarea:focus {
+  outline: 3px solid rgba(77, 141, 69, 0.18);
+  border-color: var(--green);
+}
+
+.agent-reply {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--green-soft);
+  color: var(--text);
+  line-height: 1.55;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.agent-entry-actions {
+  display: flex;
+}
+
 .ai-understanding-card {
   margin-bottom: 12px;
   background:
