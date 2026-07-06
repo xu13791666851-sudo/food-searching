@@ -96,7 +96,8 @@ function inferOutPreferences(text) {
   else if (/15\s*分钟|十五分钟/i.test(text)) result.time = "15 分钟内";
   else if (/近一点|最近|越近越好|不想走/i.test(text)) result.time = "越近越好";
 
-  if (/米饭|盖饭|炒饭|饭类/i.test(text)) result.taste = "米饭类";
+  if (/高蛋白|低脂|减脂|低卡|少油|健康|轻食|鸡胸|牛肉|鱼|虾/i.test(text)) result.taste = "清淡点";
+  else if (/米饭|盖饭|炒饭|饭类/i.test(text)) result.taste = "米饭类";
   else if (/面条|面食|拉面|拌面|粉|米线/i.test(text)) result.taste = "面食类";
   else if (/汤|热汤|汤汤水水/i.test(text)) result.taste = "汤汤水水";
   else if (/清淡|不辣|不要辣|少油/i.test(text)) result.taste = "清淡点";
@@ -162,9 +163,19 @@ function pick(value, options) {
 
 function buildReply(message, mode, preferences) {
   if (mode === "out") {
-    return `我理解你想找外面吃、人均 ${preferences.budget}、${preferences.time}、偏向${preferences.taste}。我现在帮你找真实餐厅。`;
+    const extra = buildConstraintSummary(message);
+    return `我理解你想找外面吃、人均 ${preferences.budget}、${preferences.time}、偏向${preferences.taste}${extra ? `，并且要避开${extra}` : ""}。我现在帮你找真实餐厅。`;
   }
   return `我理解你想在家吃，偏向${preferences.taste}、${preferences.time}、预算${preferences.budget}。我现在帮你想可执行的菜。`;
+}
+
+function buildConstraintSummary(message) {
+  const parts = [];
+  if (/高蛋白|蛋白|鸡胸|牛肉|鱼|虾/i.test(message)) parts.push("低蛋白选项");
+  if (/低脂|减脂|低卡|少油|健康|轻食/i.test(message)) parts.push("油腻和纯主食");
+  if (/不要商场|不想去商场|别.*商场/i.test(message)) parts.push("商场店");
+  if (/不要甜品|不要奶茶|不要咖啡|别.*甜品|别.*奶茶|别.*咖啡/i.test(message)) parts.push("饮品甜品");
+  return parts.join("、");
 }
 
 function cleanText(value, maxLength) {
