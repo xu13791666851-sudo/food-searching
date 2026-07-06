@@ -838,7 +838,7 @@ async function fetchNearbyRestaurants(coords, options = {}) {
       locationSearchFailed: false,
       actionMessage: "",
       shoppingList: [],
-      restaurantMessage: `已根据${searchPlaceText}整理出 ${liveEatOutFoods.length} 个候选${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你排序" : ""}。距离和人均为高德参考值。`,
+      restaurantMessage: `已根据${searchPlaceText}整理出 ${liveEatOutFoods.length} 个候选${state.budget ? `，优先按 ${state.budget}` : ""}${state.time ? `，距离偏好：${state.time}` : ""}${data.radius ? `，搜索范围约 ${Number(data.radius) / 1000} 公里` : ""}${accuracyText}${data.ai ? "，AI 已帮你排序" : ""}。距离和人均为高德参考值。`,
       step: 4,
     });
   } catch (error) {
@@ -953,7 +953,7 @@ function renderResult() {
     <div class="section-title compact">
       <p class="eyebrow">${state.mode === "out" ? "附近推荐" : state.homeSource === "saved" ? "从你的菜里挑" : "今天做这个"}</p>
       <h2>给你挑了 ${list.length} 个</h2>
-      <p class="muted-line">${state.mood} · ${state.taste} · ${state.time}</p>
+      <p class="muted-line">${[state.mood, state.taste, state.time, state.budget].filter(Boolean).join(" · ")}</p>
       ${state.restaurantMessage ? `<p class="form-message">${state.restaurantMessage}</p>` : ""}
     </div>
     <div class="candidate-list">
