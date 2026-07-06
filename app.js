@@ -648,7 +648,7 @@ function localAgentDecision(message) {
 }
 
 function inferAgentMode(text) {
-  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均/i.test(text)) return "out";
+  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均|日料|日本料理|寿司|刺身|韩餐|韩国料理|火锅|烧烤|烤肉|轻食|沙拉|粤菜|川菜|湘菜/i.test(text)) return "out";
   if (/在家|家里|做饭|菜谱|自己做|冰箱|买菜|厨房/i.test(text)) return "home";
   return "";
 }
