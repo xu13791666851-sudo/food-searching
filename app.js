@@ -8,6 +8,7 @@ const state = {
   time: "",
   health: "",
   aiNote: "",
+  aiIntentSummary: "",
   refineOpen: false,
   locationOpen: false,
   locationSearchFailed: false,
@@ -376,6 +377,7 @@ function reset() {
     time: "",
     health: "",
     aiNote: "",
+    aiIntentSummary: "",
     refineOpen: false,
     locationOpen: false,
     locationSearchFailed: false,
@@ -451,6 +453,7 @@ function renderScene() {
         time: "",
         health: "",
         aiNote: "",
+        aiIntentSummary: "",
         actionMessage: "",
         shoppingList: [],
       });
@@ -504,6 +507,7 @@ function renderHomeSource() {
           time: "",
           health: "",
           aiNote: "",
+          aiIntentSummary: "",
           actionMessage: "",
           shoppingList: [],
         });
@@ -573,20 +577,29 @@ function renderPreference() {
   const profile = preferenceProfiles[isOut ? "out" : "home"];
   $("#workspace").innerHTML = `
     <div class="section-title compact">
-      <p class="eyebrow">${isOut ? "外面吃" : state.homeSource === "saved" ? "从做过的菜里挑" : "按今天偏好推荐"}</p>
-      <h2>${isOut ? "今天外面想吃什么？" : "今天在家想吃什么？"}</h2>
+      <p class="eyebrow">${isOut ? "AI 找附近餐厅" : state.homeSource === "saved" ? "从做过的菜里挑" : "AI 想一道菜"}</p>
+      <h2>${isOut ? "直接告诉我这顿想怎么吃" : "跟我说说今天想在家吃什么"}</h2>
       <p class="muted-line">${profile.intro}</p>
+    </div>
+    <section class="ai-chat-card">
+      <div>
+        <span class="ai-badge">AI 先理解</span>
+        <h3>随便说一句，我会带着这句话推荐</h3>
+      </div>
+      <textarea class="ai-note-input" id="aiNoteInput" rows="4" placeholder="${profile.notePlaceholder}">${escapeHtml(state.aiNote)}</textarea>
+      <div class="ai-example-row">
+        ${aiExamples(isOut).map((item) => `<button class="mini-chip" type="button" data-ai-example="${item}">${item}</button>`).join("")}
+      </div>
+    </section>
+    <div class="ai-helper-line">
+      <span>下面可以点几项补充，不想点也可以直接看推荐。</span>
     </div>
     <div class="preference-stack">
       ${profile.groups.map((group) => preferenceGroup(group)).join("")}
     </div>
-    <div class="simple-block">
-      <h3>像跟朋友说一句</h3>
-      <textarea class="ai-note-input" id="aiNoteInput" rows="3" placeholder="${profile.notePlaceholder}">${escapeHtml(state.aiNote)}</textarea>
-    </div>
     <div class="action-row sticky-actions">
       <button class="secondary-button" type="button" id="backBtn">上一步</button>
-      <button class="primary-button" type="button" id="nextBtn">看推荐</button>
+      <button class="primary-button" type="button" id="nextBtn">让 AI 帮我定</button>
     </div>
   `;
   bindChoice("mood");
@@ -595,40 +608,61 @@ function renderPreference() {
   bindChoice("time");
   bindChoice("health");
   $("#backBtn").addEventListener("click", () => setState({ step: state.mode === "home" ? 2 : 1 }));
+  document.querySelectorAll("[data-ai-example]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const input = $("#aiNoteInput");
+      const text = button.dataset.aiExample;
+      if (!input) return;
+      input.value = input.value.trim() ? `${input.value.trim()}，${text}` : text;
+      setState({ aiNote: input.value });
+    });
+  });
   $("#nextBtn").addEventListener("click", () => {
     const aiNote = $("#aiNoteInput") ? $("#aiNoteInput").value.trim() : "";
+    const inferred = inferPreferencesFromText(aiNote, profile, state.mode);
+    const nextPreferences = {
+      mood: state.mood || inferred.mood || defaultPreference(profile, "mood"),
+      taste: state.taste || inferred.taste || defaultPreference(profile, "taste"),
+      time: state.time || inferred.time || defaultPreference(profile, "time"),
+      budget: state.budget || inferred.budget || defaultPreference(profile, "budget"),
+      health: state.health || inferred.health || defaultPreference(profile, "health"),
+    };
+    const aiIntentSummary = buildAiIntentSummary({
+      mode: state.mode,
+      note: aiNote,
+      preferences: nextPreferences,
+      inferred,
+    });
     if (state.mode === "out") {
       liveEatOutFoods = [];
     } else {
       liveHomeFoods = [];
     }
     setState({
-      mood: state.mood || defaultPreference(profile, "mood"),
-      taste: state.taste || defaultPreference(profile, "taste"),
-      time: state.time || defaultPreference(profile, "time"),
-      budget: state.budget || defaultPreference(profile, "budget"),
-      health: state.health || defaultPreference(profile, "health"),
+      mood: nextPreferences.mood,
+      taste: nextPreferences.taste,
+      time: nextPreferences.time,
+      budget: nextPreferences.budget,
+      health: nextPreferences.health,
       aiNote,
+      aiIntentSummary,
       refineOpen: false,
       refineReason: "",
       recommendationBatch: 0,
       restaurantMessage: "",
       actionMessage: "",
       shoppingList: [],
-      loadingTitle: state.mode === "out" ? "正在帮你找附近正餐" : "正在想今天在家做什么",
-      loadingDetail: state.mode === "out" ? "先看真实餐厅，再让 AI 帮你缩小选择。" : "我会按你的口味、时间和健康偏好生成 3 个菜谱。",
+      loadingTitle: state.mode === "out" ? "AI 正在理解并找附近餐厅" : "AI 正在理解今天想吃什么",
+      loadingDetail: aiIntentSummary,
       step: 6,
     });
     trackEvent("submit_preferences", {
       mode: state.mode,
       homeSource: state.homeSource,
       preferences: {
-        mood: state.mood || defaultPreference(profile, "mood"),
-        taste: state.taste || defaultPreference(profile, "taste"),
-        time: state.time || defaultPreference(profile, "time"),
-        budget: state.budget || defaultPreference(profile, "budget"),
-        health: state.health || defaultPreference(profile, "health"),
+        ...nextPreferences,
         hasNote: Boolean(aiNote),
+        inferred: Object.keys(inferred),
       },
     });
     if (state.mode === "out") {
@@ -658,6 +692,93 @@ function defaultPreference(profile, key) {
   return profile.groups.find((group) => group.key === key)?.options[0] || "";
 }
 
+function aiExamples(isOut) {
+  return isOut
+    ? ["60-100，可以远一点", "不要商场，想吃正餐", "两个人聊天，环境舒服点"]
+    : ["不想洗碗，30 分钟内", "家里有鸡蛋番茄", "想吃热乎但清淡点"];
+}
+
+function readCurrentAiNote() {
+  const input = $("#aiNoteInput");
+  return input ? input.value.trim() : state.aiNote;
+}
+
+function inferPreferencesFromText(text, profile, mode) {
+  const value = String(text || "");
+  const inferred = {};
+  const has = (pattern) => pattern.test(value);
+
+  if (mode === "out") {
+    if (has(/60\s*[-到至~]\s*100|60.*100|人均.*(六十|一百)/i)) inferred.budget = "60-100 元";
+    else if (has(/30\s*[-到至~]\s*60|30.*60/i)) inferred.budget = "30-60 元";
+    else if (has(/30\s*元?内|三十.*内|便宜|省钱/i)) inferred.budget = "30 元内";
+    else if (has(/贵点|吃好点|好一点|品质|环境好/i)) inferred.budget = "今天可以贵点";
+
+    if (has(/远一点|远点|走远|不介意远|远一些|商圈/i)) inferred.time = "可以走远点";
+    else if (has(/15\s*分钟|十五分钟/i)) inferred.time = "15 分钟内";
+    else if (has(/近一点|最近|越近越好|不想走/i)) inferred.time = "越近越好";
+
+    if (has(/米饭|盖饭|炒饭|饭类/i)) inferred.taste = "米饭类";
+    else if (has(/面|粉|米线/i)) inferred.taste = "面食类";
+    else if (has(/汤|热汤|汤汤水水/i)) inferred.taste = "汤汤水水";
+    else if (has(/清淡|不辣|不要辣|少油/i)) inferred.taste = "清淡点";
+    else if (has(/辣|重口|川菜|湘菜/i)) inferred.taste = "重口味";
+    else if (has(/正餐|吃饱|饱腹/i)) inferred.taste = "正餐饱腹";
+
+    if (has(/朋友|两个人|聊天|约/i)) inferred.mood = "和朋友吃";
+    else if (has(/一个人|自己/i)) inferred.mood = "一个人吃";
+    else if (has(/快点|赶时间|快速/i)) inferred.mood = "快速解决";
+    else if (has(/坐一会|环境|休息/i)) inferred.mood = "想坐一会儿";
+
+    if (has(/不排队|别排队/i)) inferred.health = "不排队";
+    else if (has(/等.*10|十分钟/i)) inferred.health = "可等 10 分钟";
+    else if (has(/好吃可以等|可以等/i)) inferred.health = "好吃可以等";
+  } else {
+    if (has(/懒|不想动|省事|不想洗碗/i)) inferred.mood = "懒得动";
+    else if (has(/简单|快手/i)) inferred.mood = "简单做";
+    else if (has(/认真|好好做/i)) inferred.mood = "认真做一顿";
+    else if (has(/安慰|舒服|治愈/i)) inferred.mood = "想被安慰";
+
+    if (has(/汤|热汤|汤汤水水/i)) inferred.taste = "想喝汤";
+    else if (has(/清淡|少油|不辣/i)) inferred.taste = "清爽少油";
+    else if (has(/蛋白|鸡胸|牛肉|虾/i)) inferred.taste = "高蛋白";
+    else if (has(/辣|重口/i)) inferred.taste = "重口味";
+    else if (has(/一锅|少洗碗/i)) inferred.taste = "一锅出";
+    else if (has(/下饭|米饭|盖饭/i)) inferred.taste = "下饭热乎";
+
+    if (has(/15\s*分钟|十五分钟|很快/i)) inferred.time = "15 分钟内";
+    else if (has(/45\s*分钟|四十五/i)) inferred.time = "45 分钟也行";
+    else if (has(/30\s*分钟|半小时/i)) inferred.time = "30 分钟内";
+
+    if (has(/20\s*元?内|二十.*内/i)) inferred.budget = "20 元内";
+    else if (has(/20\s*[-到至~]\s*40|二十.*四十/i)) inferred.budget = "20-40 元";
+    else if (has(/40\s*[-到至~]\s*60|四十.*六十/i)) inferred.budget = "40-60 元";
+
+    if (has(/少洗碗|一锅/i)) inferred.health = "少洗碗";
+    else if (has(/不想买菜|冰箱|家里有/i)) inferred.health = "不想买菜";
+    else if (has(/下楼买|可以买/i)) inferred.health = "可以下楼买一点";
+    else if (has(/健康|少油|轻/i)) inferred.health = "健康一点";
+  }
+
+  for (const group of profile.groups) {
+    if (inferred[group.key] && !group.options.includes(inferred[group.key])) delete inferred[group.key];
+  }
+
+  return inferred;
+}
+
+function buildAiIntentSummary({ mode, note, preferences, inferred }) {
+  const parts = [];
+  if (note) parts.push(`你刚才说：“${note}”`);
+  if (mode === "out") {
+    parts.push(`我会优先按「${preferences.budget}」「${preferences.time}」「${preferences.taste}」来筛真实餐厅`);
+  } else {
+    parts.push(`我会优先按「${preferences.taste}」「${preferences.time}」「${preferences.health}」来想菜`);
+  }
+  if (Object.keys(inferred).length) parts.push("有些条件我已经从你那句话里自动读出来了");
+  return parts.join("。") + "。";
+}
+
 function quickSelect(key, label, options) {
   return `
     <div class="quick-select">
@@ -671,7 +792,7 @@ function quickSelect(key, label, options) {
 
 function bindChoice(key) {
   document.querySelectorAll(`[data-${key}]`).forEach((button) => {
-    button.addEventListener("click", () => setState({ [key]: button.dataset[key] }));
+    button.addEventListener("click", () => setState({ [key]: button.dataset[key], aiNote: readCurrentAiNote() }));
   });
 }
 
@@ -956,6 +1077,10 @@ function renderResult() {
       <p class="muted-line">${[state.mood, state.taste, state.time, state.budget].filter(Boolean).join(" · ")}</p>
       ${state.restaurantMessage ? `<p class="form-message">${state.restaurantMessage}</p>` : ""}
     </div>
+    ${state.aiIntentSummary ? `<section class="ai-understanding-card">
+      <span class="ai-badge">AI 理解</span>
+      <p>${escapeHtml(state.aiIntentSummary)}</p>
+    </section>` : ""}
     <div class="candidate-list">
       ${list.map((item) => candidateCard(item)).join("")}
     </div>
@@ -1074,6 +1199,7 @@ function renderResult() {
         locationOpen: false,
         locationSearchFailed: false,
         refineReason: message,
+        aiIntentSummary: `收到你的补充：“${message}”。这次我会带着这个新要求重新筛附近餐厅。`,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
         actionMessage: "",
@@ -1103,6 +1229,7 @@ function renderResult() {
         locationOpen: false,
         locationSearchFailed: false,
         refineReason: button.dataset.refineReason,
+        aiIntentSummary: `收到你的反馈：“${button.dataset.refineReason}”。这次会优先避开这个问题。`,
         recommendationBatch: nextBatch,
         restaurantMessage: "",
         actionMessage: "",
