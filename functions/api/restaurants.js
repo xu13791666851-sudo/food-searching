@@ -27,11 +27,12 @@ export async function onRequestGet(context) {
   try {
     const searchPoint = coord === "gcj02" ? { lat, lng } : wgs84ToGcj02(lat, lng);
     const strictText = `${refine} ${note} ${taste} ${time} ${budget}`;
+    const intent = buildPreferenceIntent({ taste, budget, time, note, refine });
     const wantsWiderSearch = wantsFarther(strictText);
     const primary = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
       lat: searchPoint.lat,
       lng: searchPoint.lng,
-      keyword: refine.includes("不想吃这个口味") ? "" : keywordFromTaste(taste),
+      keyword: refine.includes("不想吃这个口味") ? "" : keywordFromTaste(taste, strictText),
       radius: radiusFromPreference(strictText),
       offset: "25",
       pageStart: batch * 2 + 1,
@@ -62,19 +63,21 @@ export async function onRequestGet(context) {
       .filter((poi) => poi && poi.name)
       .filter((poi) => isMealRestaurant(poi));
     const refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, strictText, budget));
-    const budgetCandidates = refinedCandidates.filter((poi) => isBudgetReasonable(poi, budget, strictText));
+    const intentCandidates = refinedCandidates.filter((poi) => isIntentReasonable(poi, intent));
+    const intentBaseCandidates = intentCandidates.length >= 4 ? intentCandidates : refinedCandidates;
+    const budgetCandidates = intentBaseCandidates.filter((poi) => isBudgetReasonable(poi, budget, strictText));
     const distanceCandidates = budgetCandidates.filter((poi) => isDistanceReasonable(poi, strictText));
     const candidatePois =
       distanceCandidates.length >= 6
         ? distanceCandidates
         : budgetCandidates.length >= 6
           ? budgetCandidates
-          : refinedCandidates.length >= 6
-            ? refinedCandidates
+          : intentBaseCandidates.length >= 6
+            ? intentBaseCandidates
             : mealCandidates;
-    const restaurants = sortPoisForPreference(candidatePois, { taste, budget, time, note, refine })
+    const restaurants = sortPoisForPreference(candidatePois, { taste, budget, time, note, refine, intent })
       .slice(0, 18)
-      .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note, refine }));
+      .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note, refine, intent }));
 
     if (!restaurants.length) {
       return json({
@@ -84,8 +87,8 @@ export async function onRequestGet(context) {
       }, 404);
     }
 
-    const aiResult = await applyAiRecommendation(context.env, restaurants, { taste, budget, time, note, refine });
-    const orderedRestaurants = sortRestaurantsForPreference(aiResult.restaurants, { taste, budget, time, note, refine });
+    const aiResult = await applyAiRecommendation(context.env, restaurants, { taste, budget, time, note, refine, intent });
+    const orderedRestaurants = sortRestaurantsForPreference(aiResult.restaurants, { taste, budget, time, note, refine, intent });
 
     return json({
       ok: true,
@@ -265,6 +268,8 @@ function buildAiMessages(restaurants, preference) {
         ranking_rules: [
           "预算区间是强优先条件。比如用户选 60-100 元，就优先选择人均 60-100 元的餐厅，不要把 60 元以下餐厅排在前面，除非候选里没有足够选择。",
           "距离/时间也要尊重。用户选“可以走远点”时，不要只按最近排序，可以为了更匹配的价格、口味、评分选择稍远的店。",
+          "用户一句话里的目标和排除项是强条件。比如高蛋白、低脂、减脂、少油、不要商场、不要甜品，都必须影响排序。",
+          "如果用户要高蛋白低脂，优先轻食、沙拉、健康餐、鸡胸、鱼虾、牛肉、海鲜等；汉堡炸物、烤饼煎饼、甜品饮品、纯面粉主食不要排前面。",
           "如果餐厅价格、距离、口味不符合用户选择，理由里必须诚实说明，不要硬说合适。",
         ],
         refinement_rule: preference.refine
@@ -394,6 +399,36 @@ function isMealRestaurant(poi) {
   return !snackOnlyWords.some((word) => text.includes(word));
 }
 
+function buildPreferenceIntent(preference) {
+  const text = `${preference.refine || ""} ${preference.note || ""} ${preference.taste || ""} ${preference.time || ""} ${preference.budget || ""}`;
+  return {
+    text,
+    wantsHealthy: /高蛋白|蛋白|低脂|减脂|低卡|少油|健康|轻食|健身|控卡|清淡/i.test(text),
+    wantsHighProtein: /高蛋白|蛋白|鸡胸|牛肉|鱼|虾|海鲜/i.test(text),
+    wantsLowFat: /低脂|减脂|低卡|少油|健康|轻食|控卡|清淡/i.test(text),
+    avoidsMall: /不要商场|不想去商场|别.*商场/i.test(text),
+    avoidsSnack: /不要甜品|不要奶茶|不要咖啡|别.*甜品|别.*奶茶|别.*咖啡/i.test(text),
+  };
+}
+
+function poiSearchText(poi) {
+  return `${poi.name || ""} ${poi.type || ""} ${poi.address || ""}`;
+}
+
+function isIntentReasonable(poi, intent) {
+  const text = poiSearchText(poi);
+
+  if (intent.avoidsMall && /商场|购物中心|广场|mall/i.test(text)) return false;
+  if (intent.avoidsSnack && /咖啡|奶茶|茶饮|甜品|蛋糕|面包|饮品|coffee|cafe/i.test(text)) return false;
+  if (intent.wantsHealthy && isObviousHealthyMismatch(text)) return false;
+
+  return true;
+}
+
+function isObviousHealthyMismatch(text) {
+  return /麦当劳|肯德基|汉堡|炸鸡|薯条|披萨|烤饼|烧饼|煎饼|锅盔|油条|炸串|炸物|甜品|蛋糕|奶茶|饮品|面包|糕点/i.test(text);
+}
+
 function isRefineReasonable(poi, refine, budget) {
   const cost = Number(costValue(poi));
   const distance = Number(poi.distance || 0);
@@ -484,10 +519,12 @@ function preferenceScoreForPoi(poi, preference) {
   const cost = Number(costValue(poi));
   const distance = Number(poi.distance || 0);
   const rating = Number(ratingValue(poi));
+  const intent = preference.intent || buildPreferenceIntent(preference);
   let score = 0;
 
   score += budgetScore(cost, preference.budget);
   score += distanceScore(distance, text);
+  score += intentScoreForText(poiSearchText(poi), intent);
   if (matchesTaste(poi, preference.taste)) score += 22;
   if (isProperMealText(`${poi.name || ""} ${poi.type || ""}`)) score += 12;
   if (Number.isFinite(rating)) score += Math.max(0, rating - 3.5) * 8;
@@ -499,13 +536,40 @@ function preferenceScoreForRestaurant(item, preference) {
   const text = `${preference.refine || ""} ${preference.note || ""} ${preference.time || ""}`;
   const cost = Number(item.cost || 0);
   const distance = Number(item.distance || 0);
+  const intent = preference.intent || buildPreferenceIntent(preference);
   let score = 0;
 
   score += budgetScore(cost, preference.budget);
   score += distanceScore(distance, text);
+  score += intentScoreForText(`${item.name || ""} ${item.tag || ""} ${item.address || ""} ${item.reason || ""}`, intent);
   if (item.match && item.match.includes("预算命中")) score += 18;
   if (item.match && item.match.includes("口味接近")) score += 12;
+  if (item.match && item.match.includes("健康目标接近")) score += 28;
   if (/高德评分\s*4\.[5-9]|高德评分\s*5/.test(item.health || "")) score += 10;
+
+  return score;
+}
+
+function intentScoreForText(text, intent) {
+  if (!intent || !intent.text) return 0;
+  let score = 0;
+
+  if (intent.wantsHealthy) {
+    if (/轻食|沙拉|健康餐|健身餐|低脂|低卡|简餐|日料|寿司|刺身|海鲜|鱼|虾|鸡胸|牛肉|牛排|汤|粥/i.test(text)) score += 55;
+    if (/家常|中餐|粤菜|本帮|蒸|炖|煮/i.test(text)) score += 16;
+    if (/麦当劳|肯德基|汉堡|炸|薯条|披萨|烤饼|烧饼|煎饼|锅盔|甜品|奶茶|面包|糕点/i.test(text)) score -= 120;
+    if (/小面|拌面|拉面|米粉|粉|面馆|烤肉|烧烤|火锅|麻辣|冒菜/i.test(text)) score -= 36;
+  }
+
+  if (intent.wantsHighProtein) {
+    if (/鸡胸|牛肉|牛排|鱼|虾|海鲜|刺身|蛋|豆腐/i.test(text)) score += 38;
+    if (/烤饼|烧饼|煎饼|米粉|小面|面馆|粥|甜品|奶茶/i.test(text)) score -= 42;
+  }
+
+  if (intent.wantsLowFat) {
+    if (/轻食|沙拉|低脂|低卡|清蒸|水煮|粥|汤|日料|寿司/i.test(text)) score += 28;
+    if (/炸|烤肉|烧烤|火锅|麻辣|肥牛|肥肠|五花|汉堡|薯条/i.test(text)) score -= 55;
+  }
 
   return score;
 }
@@ -557,11 +621,14 @@ function distanceScore(distance, preferenceText) {
 function describeMatch({ cost, distance, poi, preference }) {
   const parts = [];
   const range = budgetRange(preference.budget);
+  const intent = preference.intent || buildPreferenceIntent(preference);
+  const text = poiSearchText(poi);
   if (Number.isFinite(cost) && cost > 0) {
     if (cost >= range.idealMin && cost <= range.idealMax) parts.push("预算命中");
     else if (range.strictMin > 0 && cost < range.strictMin) parts.push("低于预算区间");
     else if (Number.isFinite(range.max) && cost > range.max) parts.push("高于预算区间");
   }
+  if (intent.wantsHealthy && intentScoreForText(text, intent) > 35) parts.push("健康目标接近");
   if (matchesTaste(poi, preference.taste)) parts.push("口味接近");
   if (wantsFarther(`${preference.time || ""} ${preference.note || ""} ${preference.refine || ""}`)) {
     parts.push(distance >= 600 ? "可接受稍远" : "距离很近但不是唯一依据");
@@ -615,6 +682,7 @@ function openingReason({ category, taste, minutes, rating }) {
 function tasteReason(poi, taste) {
   if (!taste) return "";
   if (matchesTaste(poi, taste)) return `和“${taste}”比较接近`;
+  if (taste.includes("清淡")) return "不一定完全命中清淡健康，但可作为附近正餐备选";
   if (taste.includes("米饭")) return "不一定完全命中米饭类，但可以作为附近正餐备选";
   if (taste.includes("面")) return "不一定完全命中面食，但可以作为附近正餐备选";
   if (taste.includes("辣")) return "不一定完全命中辣味，但可以作为附近正餐备选";
@@ -661,6 +729,7 @@ function restaurantCategory(poi) {
 function matchesTaste(poi, taste) {
   const text = `${poi.name || ""} ${poi.type || ""}`;
   if (!taste) return false;
+  if (taste.includes("清淡")) return /轻食|沙拉|健康餐|健身餐|低脂|低卡|粥|汤|日料|寿司|海鲜|鱼|虾|鸡|牛肉|简餐|粤菜/.test(text);
   if (taste.includes("米饭")) return /饭|盖浇|简餐|快餐|中餐|黄焖|煲仔|便当|炒菜/.test(text);
   if (taste.includes("面")) return /面|粉|馄饨|饺/.test(text);
   if (taste.includes("辣")) return /川|湘|火锅|麻辣|冒菜|烤鱼/.test(text);
@@ -668,10 +737,12 @@ function matchesTaste(poi, taste) {
   return false;
 }
 
-function keywordFromTaste(taste) {
+function keywordFromTaste(taste, preferenceText = "") {
+  if (/高蛋白|蛋白|低脂|减脂|低卡|少油|健康|轻食|健身|控卡/i.test(preferenceText)) return "轻食 沙拉 健康餐 鸡胸 牛肉 鱼 虾";
   if (taste.includes("辣")) return "川菜 湘菜 火锅";
   if (taste.includes("面")) return "面馆 面食";
   if (taste.includes("米饭")) return "盖饭 炒饭 简餐 快餐";
+  if (taste.includes("清淡")) return "轻食 沙拉 粥 汤 日料";
   if (taste.includes("热汤") || taste.includes("汤汤水水")) return "汤饭 面馆 馄饨 米线";
   if (taste.includes("正餐")) return "中餐 快餐 简餐";
   if (taste.includes("酸甜")) return "粤菜 本帮菜";
