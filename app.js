@@ -910,7 +910,8 @@ function inferPreferencesFromText(text, profile, mode) {
     else if (has(/15\s*分钟|十五分钟/i)) inferred.time = "15 分钟内";
     else if (has(/近一点|最近|越近越好|不想走/i)) inferred.time = "越近越好";
 
-    if (has(/米饭|盖饭|炒饭|饭类/i)) inferred.taste = "米饭类";
+    if (has(/高蛋白|低脂|减脂|低卡|少油|健康|轻食|鸡胸|牛肉|鱼|虾/i)) inferred.taste = "清淡点";
+    else if (has(/米饭|盖饭|炒饭|饭类/i)) inferred.taste = "米饭类";
     else if (has(/面条|面食|拉面|拌面|粉|米线/i)) inferred.taste = "面食类";
     else if (has(/汤|热汤|汤汤水水/i)) inferred.taste = "汤汤水水";
     else if (has(/清淡|不辣|不要辣|少油/i)) inferred.taste = "清淡点";
@@ -964,6 +965,9 @@ function buildAiIntentSummary({ mode, note, preferences, inferred }) {
   if (note) parts.push(`你刚才说：“${note}”`);
   if (mode === "out") {
     parts.push(`我会优先按「${preferences.budget}」「${preferences.time}」「${preferences.taste}」来筛真实餐厅`);
+    if (/高蛋白|低脂|减脂|低卡|少油|健康|轻食|不要商场|不要甜品|不要奶茶|不要咖啡/i.test(note)) {
+      parts.push("你额外说的营养目标和排除项也会当成筛选条件");
+    }
   } else {
     parts.push(`我会优先按「${preferences.taste}」「${preferences.time}」「${preferences.health}」来想菜`);
   }
