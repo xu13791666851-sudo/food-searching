@@ -63,8 +63,12 @@ export async function onRequestGet(context) {
       .filter((poi) => poi && poi.name)
       .filter((poi) => isMealRestaurant(poi));
     const refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, strictText, budget));
-    const intentCandidates = refinedCandidates.filter((poi) => isIntentReasonable(poi, intent));
-    const intentBaseCandidates = intentCandidates.length >= 4 ? intentCandidates : refinedCandidates;
+    const categoryCandidates = intent.targetCategory
+      ? refinedCandidates.filter((poi) => matchesTargetCategory(poiSearchText(poi), intent))
+      : [];
+    const categoryBaseCandidates = categoryCandidates.length >= 3 ? categoryCandidates : refinedCandidates;
+    const intentCandidates = categoryBaseCandidates.filter((poi) => isIntentReasonable(poi, intent));
+    const intentBaseCandidates = intentCandidates.length >= 4 ? intentCandidates : categoryBaseCandidates;
     const budgetCandidates = intentBaseCandidates.filter((poi) => isBudgetReasonable(poi, budget, strictText));
     const distanceCandidates = budgetCandidates.filter((poi) => isDistanceReasonable(poi, strictText));
     const candidatePois =
@@ -269,6 +273,7 @@ function buildAiMessages(restaurants, preference) {
           "预算区间是强优先条件。比如用户选 60-100 元，就优先选择人均 60-100 元的餐厅，不要把 60 元以下餐厅排在前面，除非候选里没有足够选择。",
           "距离/时间也要尊重。用户选“可以走远点”时，不要只按最近排序，可以为了更匹配的价格、口味、评分选择稍远的店。",
           "用户一句话里的目标和排除项是强条件。比如高蛋白、低脂、减脂、少油、不要商场、不要甜品，都必须影响排序。",
+          "如果用户明确点名餐类，比如日料、韩餐、火锅、烧烤、粤菜、川湘菜、轻食、面食、米饭类，这个餐类必须优先于距离、评分和便宜程度。非该餐类不要排在前面，除非候选中几乎没有该餐类。",
           "如果用户要高蛋白低脂，优先轻食、沙拉、健康餐、鸡胸、鱼虾、牛肉、海鲜等；汉堡炸物、烤饼煎饼、甜品饮品、纯面粉主食不要排前面。",
           "如果餐厅价格、距离、口味不符合用户选择，理由里必须诚实说明，不要硬说合适。",
         ],
@@ -401,14 +406,60 @@ function isMealRestaurant(poi) {
 
 function buildPreferenceIntent(preference) {
   const text = `${preference.refine || ""} ${preference.note || ""} ${preference.taste || ""} ${preference.time || ""} ${preference.budget || ""}`;
+  const targetCategory = detectTargetCategory(text);
   return {
     text,
+    targetCategory,
     wantsHealthy: /高蛋白|蛋白|低脂|减脂|低卡|少油|健康|轻食|健身|控卡|清淡/i.test(text),
     wantsHighProtein: /高蛋白|蛋白|鸡胸|牛肉|鱼|虾|海鲜/i.test(text),
     wantsLowFat: /低脂|减脂|低卡|少油|健康|轻食|控卡|清淡/i.test(text),
     avoidsMall: /不要商场|不想去商场|别.*商场/i.test(text),
     avoidsSnack: /不要甜品|不要奶茶|不要咖啡|别.*甜品|别.*奶茶|别.*咖啡/i.test(text),
   };
+}
+
+function detectTargetCategory(text) {
+  if (/日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i.test(text)) return "japanese";
+  if (/韩餐|韩国料理|韩式|部队锅|石锅|拌饭|烤肉/i.test(text)) return "korean";
+  if (/火锅|涮锅|锅底|串串/i.test(text)) return "hotpot";
+  if (/烧烤|烤肉|烤串|烤鱼/i.test(text)) return "grill";
+  if (/粤菜|茶餐厅|港式|烧腊|点心/i.test(text)) return "cantonese";
+  if (/川菜|湘菜|麻辣|冒菜|酸菜鱼/i.test(text)) return "spicy_chinese";
+  if (/轻食|沙拉|健康餐|健身餐|低脂|低卡/i.test(text)) return "healthy";
+  if (/面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i.test(text)) return "noodle";
+  if (/米饭|盖饭|炒饭|饭类|便当|简餐/i.test(text)) return "rice";
+  return "";
+}
+
+function matchesTargetCategory(text, intent) {
+  if (!intent.targetCategory) return true;
+  const patterns = {
+    japanese: /日料|日本料理|寿司|刺身|居酒屋|鳗鱼|拉面|日式|和食|豚骨/i,
+    korean: /韩餐|韩国料理|韩式|部队锅|石锅|拌饭|烤肉/i,
+    hotpot: /火锅|涮锅|锅底|串串/i,
+    grill: /烧烤|烤肉|烤串|烤鱼/i,
+    cantonese: /粤菜|茶餐厅|港式|烧腊|点心/i,
+    spicy_chinese: /川菜|湘菜|麻辣|冒菜|酸菜鱼/i,
+    healthy: /轻食|沙拉|健康餐|健身餐|低脂|低卡|鸡胸|牛肉|鱼|虾/i,
+    noodle: /面|粉|米线|馄饨|饺子|拉面|拌面/i,
+    rice: /饭|盖浇|炒饭|便当|煲仔|黄焖|简餐/i,
+  };
+  return patterns[intent.targetCategory]?.test(text) || false;
+}
+
+function targetCategoryLabel(category) {
+  const labels = {
+    japanese: "日料",
+    korean: "韩餐",
+    hotpot: "火锅",
+    grill: "烧烤/烤肉",
+    cantonese: "粤菜/港式",
+    spicy_chinese: "川湘/麻辣",
+    healthy: "轻食健康餐",
+    noodle: "面食粉面",
+    rice: "米饭简餐",
+  };
+  return labels[category] || "";
 }
 
 function poiSearchText(poi) {
@@ -554,6 +605,10 @@ function intentScoreForText(text, intent) {
   if (!intent || !intent.text) return 0;
   let score = 0;
 
+  if (intent.targetCategory) {
+    score += matchesTargetCategory(text, intent) ? 180 : -140;
+  }
+
   if (intent.wantsHealthy) {
     if (/轻食|沙拉|健康餐|健身餐|低脂|低卡|简餐|日料|寿司|刺身|海鲜|鱼|虾|鸡胸|牛肉|牛排|汤|粥/i.test(text)) score += 55;
     if (/家常|中餐|粤菜|本帮|蒸|炖|煮/i.test(text)) score += 16;
@@ -629,6 +684,7 @@ function describeMatch({ cost, distance, poi, preference }) {
     else if (Number.isFinite(range.max) && cost > range.max) parts.push("高于预算区间");
   }
   if (intent.wantsHealthy && intentScoreForText(text, intent) > 35) parts.push("健康目标接近");
+  if (intent.targetCategory && matchesTargetCategory(text, intent)) parts.push(`${targetCategoryLabel(intent.targetCategory)}接近`);
   if (matchesTaste(poi, preference.taste)) parts.push("口味接近");
   if (wantsFarther(`${preference.time || ""} ${preference.note || ""} ${preference.refine || ""}`)) {
     parts.push(distance >= 600 ? "可接受稍远" : "距离很近但不是唯一依据");
@@ -682,6 +738,7 @@ function openingReason({ category, taste, minutes, rating }) {
 function tasteReason(poi, taste) {
   if (!taste) return "";
   if (matchesTaste(poi, taste)) return `和“${taste}”比较接近`;
+  if (/日料|日本料理|寿司|刺身|居酒屋|鳗鱼|拉面|日式|和食/.test(poiSearchText(poi))) return "和日料方向比较接近";
   if (taste.includes("清淡")) return "不一定完全命中清淡健康，但可作为附近正餐备选";
   if (taste.includes("米饭")) return "不一定完全命中米饭类，但可以作为附近正餐备选";
   if (taste.includes("面")) return "不一定完全命中面食，但可以作为附近正餐备选";
@@ -738,6 +795,16 @@ function matchesTaste(poi, taste) {
 }
 
 function keywordFromTaste(taste, preferenceText = "") {
+  const targetCategory = detectTargetCategory(preferenceText);
+  if (targetCategory === "japanese") return "日料 日本料理 寿司 刺身 拉面";
+  if (targetCategory === "korean") return "韩餐 韩国料理 石锅拌饭 部队锅";
+  if (targetCategory === "hotpot") return "火锅 涮锅";
+  if (targetCategory === "grill") return "烧烤 烤肉 烤鱼";
+  if (targetCategory === "cantonese") return "粤菜 茶餐厅 港式 烧腊";
+  if (targetCategory === "spicy_chinese") return "川菜 湘菜 麻辣 冒菜";
+  if (targetCategory === "healthy") return "轻食 沙拉 健康餐 鸡胸 牛肉 鱼 虾";
+  if (targetCategory === "noodle") return "面馆 面食 米线 馄饨";
+  if (targetCategory === "rice") return "盖饭 炒饭 简餐 快餐";
   if (/高蛋白|蛋白|低脂|减脂|低卡|少油|健康|轻食|健身|控卡/i.test(preferenceText)) return "轻食 沙拉 健康餐 鸡胸 牛肉 鱼 虾";
   if (taste.includes("辣")) return "川菜 湘菜 火锅";
   if (taste.includes("面")) return "面馆 面食";
