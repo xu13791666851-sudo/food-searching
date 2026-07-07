@@ -7,37 +7,40 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <header class="hero">
+    <main class="app-shell agent-shell">
+      <header class="hero agent-hero">
         <div class="brand-row">
           <span class="brand-mark">食</span>
           <div>
             <strong>今天吃什么</strong>
-            <small>像懂吃的朋友一样帮你定</small>
+            <small>Agent 对话版</small>
           </div>
         </div>
-        <div class="weather-pill">上海 · 小雨 · 24°C</div>
+        <div class="agent-hero-status">
+          <span>上海 · 小雨 · 24°C</span>
+          <span>对话推进</span>
+        </div>
         <h1 class="hero-title">
-          <span>今天这顿</span>
-          <span>我帮你定</span>
+          <span>先聊天</span>
+          <span>再帮你定</span>
         </h1>
-        <p id="assistantLine">先选场景，我只问最关键的几件事。</p>
-        <a class="agent-nav-link" href="agent.html">试用新版 Agent 对话</a>
+        <p id="assistantLine">你说一句，我来判断是在家吃还是外面吃。</p>
+        <a class="agent-nav-link" href="classic.html">使用经典流程</a>
       </header>
 
-      <section class="progress-wrap" aria-label="推荐进度">
+      <section class="progress-wrap" aria-label="Agent 进度">
         <div class="progress-meta">
-          <strong id="stepTitle">第 1 步 / 共 4 步</strong>
-          <span id="stepHint">先选吃饭场景</span>
+          <strong id="stepTitle">Agent 对话</strong>
+          <span id="stepHint">选项只是快捷回复</span>
         </div>
         <div class="progress-track">
           <span id="progressBar"></span>
         </div>
       </section>
 
-      <section class="workspace" id="workspace" aria-live="polite"></section>
+      <section class="workspace agent-workspace" id="workspace" aria-live="polite"></section>
     </main>
 
-    <script src="app.js"></script>
+    <script src="agent.js"></script>
   </body>
 </html>
