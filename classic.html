@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>今天吃什么 · 经典流程</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <div class="brand-row">
+          <span class="brand-mark">食</span>
+          <div>
+            <strong>今天吃什么</strong>
+            <small>像懂吃的朋友一样帮你定</small>
+          </div>
+        </div>
+        <div class="weather-pill">上海 · 小雨 · 24°C</div>
+        <h1 class="hero-title">
+          <span>今天这顿</span>
+          <span>我帮你定</span>
+        </h1>
+        <p id="assistantLine">先选场景，我只问最关键的几件事。</p>
+        <a class="agent-nav-link" href="index.html">回到 Agent 对话</a>
+      </header>
+
+      <section class="progress-wrap" aria-label="推荐进度">
+        <div class="progress-meta">
+          <strong id="stepTitle">第 1 步 / 共 4 步</strong>
+          <span id="stepHint">先选吃饭场景</span>
+        </div>
+        <div class="progress-track">
+          <span id="progressBar"></span>
+        </div>
+      </section>
+
+      <section class="workspace" id="workspace" aria-live="polite"></section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
