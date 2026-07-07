@@ -383,6 +383,12 @@ function handleResultFeedback(message) {
 
   if (!state.lastIntent || (!state.candidates.length && state.resultMode !== "empty")) return false;
 
+  const newFoodTarget = detectFoodTarget(message);
+  if (newFoodTarget) {
+    rerunWithRefinement(`改成想吃${newFoodTarget}`, { overrideSummary: `我明白，这次改找${newFoodTarget}。` });
+    return true;
+  }
+
   if (/餐类不对|口味不对|不是这个餐类/i.test(message)) {
     addAssistant("那这次想换成哪一类？", ["韩餐", "日料", "火锅", "烧烤", "轻食", "粤菜"]);
     return true;
@@ -462,7 +468,7 @@ function rerunWithRefinement(refineText, options = {}) {
   state.lastIntent.refine = [state.lastIntent.refine, refineText].filter(Boolean).join("；");
   state.lastIntent.note = state.context;
   state.lastIntent.batch = options.advanceBatch ? (state.lastIntent.batch || 0) + 1 : state.lastIntent.batch || 0;
-  state.intentSummary = `${state.lastIntent.summary} 这次我会额外避开：${state.lastIntent.refine}`;
+  state.intentSummary = options.overrideSummary || `${state.lastIntent.summary} 这次我会额外避开：${state.lastIntent.refine}`;
   state.quickReplies = [];
   state.messages.push({ role: "assistant", text: `收到，我会按“${refineText}”重新筛一轮。` });
 
@@ -832,9 +838,10 @@ function buildSummary(mode, preferences) {
 
 function detectFoodTarget(text) {
   const value = String(text || "");
-  const direct = value.match(/(?:想吃|要吃|找|搜|附近有没有|附近的)([^，。！？!?、\s]{2,14})/);
-  if (direct) {
-    const target = cleanFoodTarget(direct[1]);
+  const directMatches = [...value.matchAll(/(?:想吃|要吃|找|搜|附近有没有|附近的)([^，。！？!?、\s]{2,14})/g)];
+  const latestDirect = directMatches[directMatches.length - 1];
+  if (latestDirect) {
+    const target = cleanFoodTarget(latestDirect[1]);
     if (target) return target;
   }
   const word = [...FOOD_TARGET_WORDS].sort((a, b) => b.length - a.length).find((item) => value.includes(item));
