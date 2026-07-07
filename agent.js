@@ -20,6 +20,18 @@ const state = {
   lastIntent: null,
 };
 
+const OUT_CATEGORY_RULES = [
+  { impliesOut: true, pattern: /日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i },
+  { impliesOut: true, pattern: /韩餐|韩国料理|韩式|部队锅|石锅|拌饭|泡菜/i },
+  { impliesOut: true, pattern: /火锅|涮锅|锅底|串串/i },
+  { impliesOut: true, pattern: /烧烤|烤肉|烤串|烤鱼/i },
+  { impliesOut: true, pattern: /粤菜|茶餐厅|港式|烧腊|点心/i },
+  { impliesOut: true, pattern: /川菜|湘菜|麻辣|冒菜|酸菜鱼/i },
+  { impliesOut: false, pattern: /轻食|沙拉|健康餐|健身餐|低脂|低卡/i },
+  { impliesOut: false, pattern: /面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i },
+  { impliesOut: false, pattern: /米饭|盖饭|炒饭|饭类|便当|简餐/i },
+];
+
 const fallbackHomeFoods = [
   {
     id: "home-tofu",
@@ -189,6 +201,21 @@ function renderResultArea() {
           <button class="primary-button" type="button" id="agentRetryLocationBtn">重新获取定位</button>
           <button class="secondary-button" type="button" id="agentTestLocationBtn">用测试位置体验</button>
           <button class="secondary-button" type="button" id="agentMockBtn">先看模拟推荐</button>
+        </div>
+      </section>
+    `;
+  }
+
+  if (state.resultMode === "empty") {
+    return `
+      <section class="location-panel">
+        <p class="eyebrow">没有硬凑</p>
+        <h2>${escapeHtml(state.resultTitle || "附近暂时没找到")}</h2>
+        <p class="muted-line">${escapeHtml(state.resultMessage || "我没有用其他餐馆凑推荐。你可以换个位置、扩大范围，或者换一个餐类。")}</p>
+        <div class="location-actions">
+          <button class="primary-button" type="button" id="agentRetryLocationBtn">重新获取定位</button>
+          <button class="secondary-button" type="button" id="agentTestLocationBtn">用测试位置体验</button>
+          <button class="secondary-button" type="button" id="agentNewChatBtn">重新说需求</button>
         </div>
       </section>
     `;
@@ -396,6 +423,10 @@ async function loadNearbyRestaurants(options = {}) {
     }
     showCandidates("out", data.restaurants.slice(0, 6), `已按真实位置整理出 ${Math.min(data.restaurants.length, 6)} 个候选${data.ai ? "，AI 已帮你排序" : ""}。`);
   } catch (error) {
+    if (isTargetCategoryNoResult(error.message)) {
+      showEmptyResult(error.message);
+      return;
+    }
     showCandidates("out", fallbackRestaurants, `真实餐厅暂时获取失败：${error.message}。先给你看模拟推荐。`);
   }
 }
@@ -446,6 +477,21 @@ function showLocationHelp(message) {
   state.resultMessage = message;
   state.candidates = [];
   render();
+}
+
+function showEmptyResult(message) {
+  state.busy = false;
+  state.resultMode = "empty";
+  state.resultTitle = "附近暂时没找到匹配餐类";
+  state.resultMessage = message;
+  state.candidates = [];
+  state.selectedId = "";
+  state.quickReplies = ["换个位置", "扩大范围", "换个餐类", "重新开始"];
+  render();
+}
+
+function isTargetCategoryNoResult(message) {
+  return /没有找到符合|不会用其他餐馆凑数|NO_TARGET_CATEGORY/.test(String(message || ""));
 }
 
 function resetAgent() {
@@ -540,8 +586,8 @@ function localAgentDecision(message) {
 }
 
 function inferMode(text) {
-  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均|日料|韩餐|火锅|烧烤|轻食|咖啡|粤菜|川菜|湘菜/i.test(text)) return "out";
   if (/在家|家里|做饭|菜谱|自己做|冰箱|买菜|厨房|不想出门|做过|保存/i.test(text)) return "home";
+  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均|咖啡/i.test(text) || OUT_CATEGORY_RULES.some((rule) => rule.impliesOut && rule.pattern.test(text))) return "out";
   return "";
 }
 
