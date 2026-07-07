@@ -67,6 +67,64 @@ const CATEGORY_RULES = [
     match: /饭|盖浇|炒饭|便当|煲仔|黄焖|简餐/i,
     keyword: "盖饭 炒饭 简餐 快餐",
   },
+  {
+    key: "fried_chicken",
+    label: "炸鸡",
+    detect: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC/i,
+    match: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC|德克士|塔斯汀|华莱士/i,
+    keyword: "炸鸡 鸡排 鸡翅 肯德基",
+  },
+  {
+    key: "burger_pizza",
+    label: "汉堡披萨",
+    detect: /汉堡|披萨|pizza|Pizza|必胜客|达美乐/i,
+    match: /汉堡|披萨|pizza|Pizza|必胜客|达美乐|汉堡王|麦当劳|塔斯汀/i,
+    keyword: "汉堡 披萨",
+  },
+  {
+    key: "malatang",
+    label: "麻辣烫冒菜",
+    detect: /麻辣烫|冒菜|串串|关东煮/i,
+    match: /麻辣烫|冒菜|串串|关东煮|杨国福|张亮/i,
+    keyword: "麻辣烫 冒菜 串串",
+  },
+];
+
+const FOOD_SEARCH_WORDS = [
+  "炸鸡",
+  "鸡排",
+  "鸡翅",
+  "汉堡",
+  "披萨",
+  "麻辣烫",
+  "冒菜",
+  "酸菜鱼",
+  "烤鱼",
+  "小龙虾",
+  "螺蛳粉",
+  "牛肉面",
+  "牛肉粉",
+  "兰州拉面",
+  "寿司",
+  "刺身",
+  "石锅拌饭",
+  "拌饭",
+  "部队锅",
+  "咖喱",
+  "泰餐",
+  "越南粉",
+  "新疆菜",
+  "新疆炒米粉",
+  "烧鸟",
+  "烤鸭",
+  "炸串",
+  "水饺",
+  "馄饨",
+  "粥",
+  "汤饭",
+  "海南鸡饭",
+  "沙县",
+  "黄焖鸡",
 ];
 
 export async function onRequestGet(context) {
@@ -95,10 +153,11 @@ export async function onRequestGet(context) {
     const strictText = `${refine} ${note} ${taste} ${time} ${budget}`;
     const intent = buildPreferenceIntent({ taste, budget, time, note, refine });
     const wantsWiderSearch = wantsFarther(strictText);
+    const searchKeyword = refine.includes("不想吃这个口味") ? "" : intent.targetKeyword || keywordFromTaste(taste, strictText);
     const primary = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
       lat: searchPoint.lat,
       lng: searchPoint.lng,
-      keyword: refine.includes("不想吃这个口味") ? "" : keywordFromTaste(taste, strictText),
+      keyword: searchKeyword,
       radius: radiusFromPreference(strictText),
       offset: "25",
       pageStart: batch * 2 + 1,
@@ -107,7 +166,9 @@ export async function onRequestGet(context) {
 
     const result = primary.pois.length
       ? primary
-      : await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
+      : searchKeyword
+        ? primary
+        : await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
           lat: searchPoint.lat,
           lng: searchPoint.lng,
           keyword: "",
@@ -129,26 +190,26 @@ export async function onRequestGet(context) {
       .filter((poi) => poi && poi.name)
       .filter((poi) => isMealRestaurant(poi));
     const refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, strictText, budget));
-    const categoryCandidates = intent.targetCategory
+    const categoryCandidates = intent.targetCategory || intent.targetKeyword
       ? refinedCandidates.filter((poi) => matchesTargetCategory(poiSearchText(poi), intent))
       : [];
-    if (intent.targetCategory && !categoryCandidates.length) {
-      const label = targetCategoryLabel(intent.targetCategory);
+    if ((intent.targetCategory || intent.targetKeyword) && !categoryCandidates.length) {
+      const label = targetCategoryLabel(intent.targetCategory) || intent.targetKeyword;
       return json({
         ok: false,
         code: "NO_TARGET_CATEGORY",
-        message: `附近没有找到符合“${label}”的真实餐厅。我不会用其他餐馆凑数，可以换个位置、扩大范围，或者换一个餐类。`,
+        message: `附近没有找到符合“${label}”的真实餐厅。我不会用其他餐馆凑数，可以换个位置、扩大范围，或者换一个想吃的东西。`,
         targetCategory: label,
         searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
       }, 404);
     }
 
-    const categoryBaseCandidates = intent.targetCategory ? categoryCandidates : refinedCandidates;
+    const categoryBaseCandidates = intent.targetCategory || intent.targetKeyword ? categoryCandidates : refinedCandidates;
     const intentCandidates = categoryBaseCandidates.filter((poi) => isIntentReasonable(poi, intent));
     const intentBaseCandidates = intentCandidates.length >= 4 ? intentCandidates : categoryBaseCandidates;
     const budgetCandidates = intentBaseCandidates.filter((poi) => isBudgetReasonable(poi, budget, strictText));
     const distanceCandidates = budgetCandidates.filter((poi) => isDistanceReasonable(poi, strictText));
-    const candidatePois = intent.targetCategory
+    const candidatePois = intent.targetCategory || intent.targetKeyword
       ? distanceCandidates.length
         ? distanceCandidates
         : budgetCandidates.length
@@ -355,7 +416,7 @@ function buildAiMessages(restaurants, preference) {
           "预算区间是强优先条件。比如用户选 60-100 元，就优先选择人均 60-100 元的餐厅，不要把 60 元以下餐厅排在前面，除非候选里没有足够选择。",
           "距离/时间也要尊重。用户选“可以走远点”时，不要只按最近排序，可以为了更匹配的价格、口味、评分选择稍远的店。",
           "用户一句话里的目标和排除项是强条件。比如高蛋白、低脂、减脂、少油、不要商场、不要甜品，都必须影响排序。",
-          "如果用户明确点名餐类，比如日料、韩餐、火锅、烧烤、粤菜、川湘菜、轻食、面食、米饭类，这个餐类必须优先于距离、评分和便宜程度。非该餐类不要排在前面，除非候选中几乎没有该餐类。",
+          "如果用户明确点名餐类或具体食物，比如日料、韩餐、火锅、烧烤、炸鸡、汉堡、披萨、麻辣烫、酸菜鱼等，这个目标必须优先于距离、评分和便宜程度。非该目标不要排在前面，除非候选中几乎没有该目标。",
           "如果用户要高蛋白低脂，优先轻食、沙拉、健康餐、鸡胸、鱼虾、牛肉、海鲜等；汉堡炸物、烤饼煎饼、甜品饮品、纯面粉主食不要排前面。",
           "如果餐厅价格、距离、口味不符合用户选择，理由里必须诚实说明，不要硬说合适。",
         ],
@@ -489,11 +550,13 @@ function isMealRestaurant(poi) {
 function buildPreferenceIntent(preference) {
   const text = `${preference.refine || ""} ${preference.note || ""} ${preference.taste || ""} ${preference.time || ""} ${preference.budget || ""}`;
   const targetCategory = detectTargetCategory(text);
+  const targetKeyword = detectSearchKeyword(text);
   return {
     text,
     targetCategory,
+    targetKeyword,
     wantsHealthy: /高蛋白|蛋白|低脂|减脂|低卡|少油|健康|轻食|健身|控卡|清淡/i.test(text),
-    wantsHighProtein: /高蛋白|蛋白|鸡胸|牛肉|鱼|虾|海鲜/i.test(text),
+    wantsHighProtein: /高蛋白|蛋白质|补蛋白|鸡胸/i.test(text),
     wantsLowFat: /低脂|减脂|低卡|少油|健康|轻食|控卡|清淡/i.test(text),
     avoidsMall: /不要商场|不想去商场|别.*商场/i.test(text),
     avoidsSnack: /不要甜品|不要奶茶|不要咖啡|别.*甜品|别.*奶茶|别.*咖啡/i.test(text),
@@ -505,8 +568,9 @@ function detectTargetCategory(text) {
 }
 
 function matchesTargetCategory(text, intent) {
-  if (!intent.targetCategory) return true;
-  return categoryRuleFor(intent.targetCategory)?.match.test(text) || false;
+  if (intent.targetKeyword) return matchesSearchKeyword(text, intent.targetKeyword);
+  if (intent.targetCategory) return categoryRuleFor(intent.targetCategory)?.match.test(text) || false;
+  return true;
 }
 
 function targetCategoryLabel(category) {
@@ -519,6 +583,35 @@ function categoryRuleFor(category) {
 
 function categoryRuleFromText(text) {
   return CATEGORY_RULES.find((rule) => rule.detect.test(String(text || ""))) || null;
+}
+
+function detectSearchKeyword(text) {
+  const value = String(text || "");
+  const direct = value.match(/(?:想吃|要吃|找|搜|附近有没有|附近的)([^，。！？!?、\s]{2,14})/);
+  if (direct) {
+    const keyword = cleanFoodTarget(direct[1]);
+    if (keyword) return keyword;
+  }
+  const explicitWord = [...FOOD_SEARCH_WORDS].sort((a, b) => b.length - a.length).find((word) => value.includes(word));
+  if (explicitWord) return explicitWord;
+  return "";
+}
+
+function cleanFoodTarget(text) {
+  const keyword = String(text || "")
+    .replace(/^(一个|一家|一些|一点|好吃的|附近的|能吃到的|没在列表里的|不在列表里的)+/g, "")
+    .replace(/(餐厅|饭店|店|外卖|附近|人均|预算|可以吗|有没有|有吗)$/g, "")
+    .trim();
+  if (!keyword || /外面吃|在家吃|今天|舒服点|随便|都可以|预算|距离/.test(keyword)) return "";
+  return keyword.slice(-8);
+}
+
+function matchesSearchKeyword(text, keyword) {
+  const value = String(text || "");
+  return String(keyword || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .some((part) => value.includes(part));
 }
 
 function poiSearchText(poi) {
@@ -668,6 +761,10 @@ function intentScoreForText(text, intent) {
     score += matchesTargetCategory(text, intent) ? 180 : -140;
   }
 
+  if (intent.targetKeyword && !intent.targetCategory) {
+    score += matchesSearchKeyword(text, intent.targetKeyword) ? 160 : -120;
+  }
+
   if (intent.wantsHealthy) {
     if (/轻食|沙拉|健康餐|健身餐|低脂|低卡|简餐|日料|寿司|刺身|海鲜|鱼|虾|鸡胸|牛肉|牛排|汤|粥/i.test(text)) score += 55;
     if (/家常|中餐|粤菜|本帮|蒸|炖|煮/i.test(text)) score += 16;
@@ -743,7 +840,8 @@ function describeMatch({ cost, distance, poi, preference }) {
     else if (Number.isFinite(range.max) && cost > range.max) parts.push("高于预算区间");
   }
   if (intent.wantsHealthy && intentScoreForText(text, intent) > 35) parts.push("健康目标接近");
-  if (intent.targetCategory && matchesTargetCategory(text, intent)) parts.push(`${targetCategoryLabel(intent.targetCategory)}接近`);
+  if (intent.targetKeyword && matchesSearchKeyword(text, intent.targetKeyword)) parts.push(`${intent.targetKeyword}接近`);
+  else if (intent.targetCategory && matchesTargetCategory(text, intent)) parts.push(`${targetCategoryLabel(intent.targetCategory)}接近`);
   if (matchesTaste(poi, preference.taste)) parts.push("口味接近");
   if (wantsFarther(`${preference.time || ""} ${preference.note || ""} ${preference.refine || ""}`)) {
     parts.push(distance >= 600 ? "可接受稍远" : "距离很近但不是唯一依据");
