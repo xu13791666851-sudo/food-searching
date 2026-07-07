@@ -243,9 +243,10 @@ function targetCategorySummary(message) {
 
 function detectFoodTarget(text) {
   const value = String(text || "");
-  const direct = value.match(/(?:想吃|要吃|找|搜|附近有没有|附近的)([^，。！？!?、\s]{2,14})/);
-  if (direct) {
-    const target = cleanFoodTarget(direct[1]);
+  const directMatches = [...value.matchAll(/(?:想吃|要吃|找|搜|附近有没有|附近的)([^，。！？!?、\s]{2,14})/g)];
+  const latestDirect = directMatches[directMatches.length - 1];
+  if (latestDirect) {
+    const target = cleanFoodTarget(latestDirect[1]);
     if (target) return target;
   }
   const word = [...FOOD_TARGET_WORDS].sort((a, b) => b.length - a.length).find((item) => value.includes(item));
