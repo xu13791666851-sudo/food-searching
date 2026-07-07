@@ -18,6 +18,7 @@ const state = {
   candidates: [],
   selectedId: "",
   lastIntent: null,
+  lastCoords: null,
 };
 
 const OUT_CATEGORY_RULES = [
@@ -85,6 +86,7 @@ const fallbackRestaurants = [
     time: "步行约 12 分钟",
     health: "真实店铺需高德确认",
     weather: "适合作为日料方向的占位候选。",
+    match: "日料接近 · 预算需确认 · 距离需确认",
   },
   {
     id: "mock-light",
@@ -96,6 +98,7 @@ const fallbackRestaurants = [
     time: "步行约 10 分钟",
     health: "低脂高蛋白",
     weather: "适合想吃清爽一点的时候。",
+    match: "健康目标接近 · 低脂高蛋白",
   },
   {
     id: "mock-rice",
@@ -107,6 +110,7 @@ const fallbackRestaurants = [
     time: "步行约 8 分钟",
     health: "家常均衡",
     weather: "适合快速解决一顿。",
+    match: "正餐备选 · 快速解决",
   },
 ];
 
@@ -163,7 +167,7 @@ function render() {
 }
 
 function updateProgress() {
-  const hasResult = state.resultMode && state.candidates.length;
+  const hasResult = state.resultMode && (state.candidates.length || state.resultMode === "empty");
   $("#stepTitle").textContent = state.busy ? "正在处理" : hasResult ? "已给出推荐" : "Agent 对话";
   $("#stepHint").textContent = hasResult ? "可以继续补充要求" : "选项只是快捷回复";
   $("#assistantLine").textContent = hasResult ? "不满意就继续说，我会带着新要求再筛。" : "你说一句，我来判断是在家吃还是外面吃。";
@@ -237,6 +241,7 @@ function renderResultArea() {
       <p class="eyebrow">当前答案</p>
       <h2>今天就吃：${escapeHtml(selected.name)}</h2>
       <p>${escapeHtml(selected.reason || "")}</p>
+      ${renderMatchBadges(selected)}
       <div class="weather-note">${escapeHtml(selected.weather || selected.address || "")}</div>
       ${state.resultMode === "home" && selected.ingredients ? `<p class="steps"><strong>准备食材：</strong>${escapeHtml(selected.ingredients)}</p>` : ""}
       ${state.resultMode === "home" && selected.steps ? `<p class="steps"><strong>简单做法：</strong>${escapeHtml(selected.steps)}</p>` : ""}
@@ -257,6 +262,7 @@ function candidateCard(item) {
         <h3>${escapeHtml(item.name)}</h3>
         <small>${escapeHtml(item.source || "")}</small>
         <p>${escapeHtml(item.reason || "")}</p>
+        ${renderMatchBadges(item)}
         <div class="candidate-meta">
           <span>${escapeHtml(item.price || "")}</span>
           <span>${escapeHtml(item.time || "")}</span>
@@ -266,6 +272,28 @@ function candidateCard(item) {
       </div>
     </article>
   `;
+}
+
+function renderMatchBadges(item) {
+  const labels = matchLabelsForItem(item).slice(0, 4);
+  if (!labels.length) return "";
+  return `<div class="match-badges">${labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>`;
+}
+
+function matchLabelsForItem(item) {
+  const labels = [];
+  String(item.match || "")
+    .split("·")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .forEach((part) => labels.push(part));
+
+  if (!labels.length && item.tag) labels.push(`${item.tag}方向`);
+  if (item.price && !/未知|确认/.test(item.price)) labels.push(item.price.replace(/^高德参考/, ""));
+  if (item.time && !/未知|确认/.test(item.time)) labels.push(item.time.replace(/^高德/, ""));
+  if (item.health && /高蛋白|低脂|健康|清爽|均衡|评分/.test(item.health)) labels.push(item.health);
+
+  return [...new Set(labels)].filter(Boolean);
 }
 
 function sendCurrentMessage() {
@@ -282,6 +310,9 @@ async function sendMessage(message) {
   state.context = [state.context, cleanMessage].filter(Boolean).join("。");
   state.draft = "";
   state.quickReplies = [];
+
+  if (handleResultFeedback(cleanMessage)) return;
+
   state.busy = true;
   state.resultTitle = "正在理解你的这句话";
   state.resultMessage = "我会先判断是在家吃还是外面吃，信息不够就继续问。";
@@ -312,6 +343,110 @@ async function sendMessage(message) {
   } catch (error) {
     addAssistant("我刚才没理解成功。你可以换句话说，或者点下面的快捷回复。", ["外面吃", "在家吃", "想吃日料", "不想出门"]);
   }
+}
+
+function handleResultFeedback(message) {
+  if (/重新开始|重来|清空/i.test(message)) {
+    resetAgent();
+    return true;
+  }
+
+  if (!state.lastIntent || (!state.candidates.length && state.resultMode !== "empty")) return false;
+
+  if (/餐类不对|口味不对|不是这个餐类/i.test(message)) {
+    addAssistant("那这次想换成哪一类？", ["韩餐", "日料", "火锅", "烧烤", "轻食", "粤菜"]);
+    return true;
+  }
+
+  if (/换个餐类|换餐类/i.test(message)) {
+    addAssistant("可以，这次换成哪一类？", ["韩餐", "日料", "火锅", "烧烤", "轻食", "粤菜"]);
+    return true;
+  }
+
+  if (/预算不对|太贵|便宜点|贵了/i.test(message)) {
+    addAssistant("预算想改成哪个范围？", ["30 元内", "30-60", "60-100", "今天可以贵点"]);
+    return true;
+  }
+
+  if (/距离|太远|近一点|越近越好/i.test(message)) {
+    rerunWithRefinement("太远，想要近一点");
+    return true;
+  }
+
+  if (/不够健康|太油|低脂|高蛋白|减脂|少油/i.test(message)) {
+    rerunWithRefinement("不够健康，想要高蛋白低脂少油");
+    return true;
+  }
+
+  if (/太麻烦|简单点|少洗碗|不想买菜/i.test(message)) {
+    rerunWithRefinement(message);
+    return true;
+  }
+
+  if (/不要商场|商场店/i.test(message)) {
+    rerunWithRefinement("不要商场店");
+    return true;
+  }
+
+  if (/换一批|再来一批|还有吗/i.test(message)) {
+    rerunWithRefinement("换一批，避开刚才这些", { advanceBatch: true });
+    return true;
+  }
+
+  if (/扩大范围|范围大一点|远一点/i.test(message)) {
+    rerunWithRefinement("扩大范围，可以走远点", { advanceBatch: true });
+    return true;
+  }
+
+  if (/换个位置|换位置/i.test(message)) {
+    state.lastCoords = null;
+    showLocationHelp("可以，重新授权定位，或者先用测试位置体验。");
+    return true;
+  }
+
+  if (/不符合|不准|不对|不是我想要|不满意/i.test(message)) {
+    addAssistant("具体是哪一块不对？我会按你点的原因重新筛。", refinementQuickReplies(state.lastIntent.mode));
+    return true;
+  }
+
+  if (isDirectRefinement(message)) {
+    rerunWithRefinement(message);
+    return true;
+  }
+
+  return false;
+}
+
+function refinementQuickReplies(mode) {
+  return mode === "home"
+    ? ["太麻烦", "不够健康", "不想买菜", "换一批", "重新开始"]
+    : ["餐类不对", "预算不对", "太远", "不够健康", "不要商场", "换一批"];
+}
+
+function isDirectRefinement(message) {
+  return /韩餐|日料|日本料理|火锅|烧烤|烤肉|轻食|粤菜|川菜|湘菜|30\s*元|30-60|60-100|贵点|分钟内/i.test(message);
+}
+
+function rerunWithRefinement(refineText, options = {}) {
+  if (!state.lastIntent) return;
+  state.lastIntent.refine = [state.lastIntent.refine, refineText].filter(Boolean).join("；");
+  state.lastIntent.note = state.context;
+  state.lastIntent.batch = options.advanceBatch ? (state.lastIntent.batch || 0) + 1 : state.lastIntent.batch || 0;
+  state.intentSummary = `${state.lastIntent.summary} 这次我会额外避开：${state.lastIntent.refine}`;
+  state.quickReplies = [];
+  state.messages.push({ role: "assistant", text: `收到，我会按“${refineText}”重新筛一轮。` });
+
+  if (state.lastIntent.mode === "home") {
+    loadHomeRecipes(state.lastIntent.preferences);
+    return;
+  }
+
+  if (state.lastCoords) {
+    loadNearbyRestaurants({ coords: state.lastCoords });
+    return;
+  }
+
+  startOutRecommendation(state.lastIntent);
 }
 
 function addAssistant(text, quickReplies = []) {
@@ -351,10 +486,10 @@ function startRecommendation(decision, homeType) {
   const preferences = normalizePreferences(decision.preferences || {}, mode);
   const summary = decision.reply || buildSummary(mode, preferences);
 
-  state.lastIntent = { mode, preferences, homeType, summary, note: state.context };
+  state.lastIntent = { mode, preferences, homeType, summary, note: state.context, refine: "", batch: 0 };
   state.messages.push({ role: "assistant", text: summary });
   state.intentSummary = summary;
-  state.quickReplies = ["太远", "不符合我说的", "换一批", "重新开始"];
+  state.quickReplies = refinementQuickReplies(mode);
 
   if (mode === "home") {
     if (homeType === "saved") {
@@ -403,6 +538,7 @@ async function loadNearbyRestaurants(options = {}) {
     showLocationHelp("还没有拿到位置。");
     return;
   }
+  state.lastCoords = coords;
 
   try {
     const params = new URLSearchParams({
@@ -413,8 +549,8 @@ async function loadNearbyRestaurants(options = {}) {
       budget: intent.preferences.budget,
       time: intent.preferences.time,
       note: intent.note,
-      refine: "",
-      batch: "0",
+      refine: intent.refine || "",
+      batch: String(intent.batch || 0),
     });
     const response = await fetch(`/api/restaurants?${params.toString()}`);
     const data = await response.json();
@@ -432,6 +568,7 @@ async function loadNearbyRestaurants(options = {}) {
 }
 
 async function loadHomeRecipes(preferences) {
+  const intent = state.lastIntent || {};
   state.busy = true;
   state.resultMode = "";
   state.resultTitle = "正在想在家吃什么";
@@ -446,8 +583,8 @@ async function loadHomeRecipes(preferences) {
       time: preferences.time,
       health: preferences.health,
       note: state.context,
-      refine: "",
-      batch: "0",
+      refine: intent.refine || "",
+      batch: String(intent.batch || 0),
     });
     const response = await fetch(`/api/home-recipes?${params.toString()}`);
     const data = await response.json();
@@ -467,6 +604,7 @@ function showCandidates(mode, items, message) {
   state.resultMessage = message;
   state.candidates = items;
   state.selectedId = items[0]?.id || "";
+  state.quickReplies = refinementQuickReplies(mode === "saved" ? "home" : mode);
   render();
 }
 
@@ -508,6 +646,7 @@ function resetAgent() {
     candidates: [],
     selectedId: "",
     lastIntent: null,
+    lastCoords: null,
   });
   render();
 }
