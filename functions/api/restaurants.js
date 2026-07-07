@@ -3,6 +3,72 @@ const jsonHeaders = {
   "Cache-Control": "no-store",
 };
 
+const CATEGORY_RULES = [
+  {
+    key: "japanese",
+    label: "日料",
+    detect: /日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i,
+    match: /日料|日本料理|寿司|刺身|居酒屋|鳗鱼|拉面|日式|和食|豚骨/i,
+    keyword: "日料 日本料理 寿司 刺身 拉面",
+  },
+  {
+    key: "korean",
+    label: "韩餐",
+    detect: /韩餐|韩国料理|韩式|部队锅|石锅|拌饭|泡菜/i,
+    match: /韩餐|韩国料理|韩式|部队锅|石锅|拌饭|泡菜/i,
+    keyword: "韩餐 韩国料理 石锅拌饭 部队锅",
+  },
+  {
+    key: "hotpot",
+    label: "火锅",
+    detect: /火锅|涮锅|锅底|串串/i,
+    match: /火锅|涮锅|锅底|串串/i,
+    keyword: "火锅 涮锅",
+  },
+  {
+    key: "grill",
+    label: "烧烤/烤肉",
+    detect: /烧烤|烤肉|烤串|烤鱼/i,
+    match: /烧烤|烤肉|烤串|烤鱼/i,
+    keyword: "烧烤 烤肉 烤鱼",
+  },
+  {
+    key: "cantonese",
+    label: "粤菜/港式",
+    detect: /粤菜|茶餐厅|港式|烧腊|点心/i,
+    match: /粤菜|茶餐厅|港式|烧腊|点心/i,
+    keyword: "粤菜 茶餐厅 港式 烧腊",
+  },
+  {
+    key: "spicy_chinese",
+    label: "川湘/麻辣",
+    detect: /川菜|湘菜|麻辣|冒菜|酸菜鱼/i,
+    match: /川菜|湘菜|麻辣|冒菜|酸菜鱼/i,
+    keyword: "川菜 湘菜 麻辣 冒菜",
+  },
+  {
+    key: "healthy",
+    label: "轻食健康餐",
+    detect: /轻食|沙拉|健康餐|健身餐|低脂|低卡/i,
+    match: /轻食|沙拉|健康餐|健身餐|低脂|低卡|鸡胸|牛肉|鱼|虾/i,
+    keyword: "轻食 沙拉 健康餐 鸡胸 牛肉 鱼 虾",
+  },
+  {
+    key: "noodle",
+    label: "面食粉面",
+    detect: /面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i,
+    match: /面|粉|米线|馄饨|饺子|拉面|拌面/i,
+    keyword: "面馆 面食 米线 馄饨",
+  },
+  {
+    key: "rice",
+    label: "米饭简餐",
+    detect: /米饭|盖饭|炒饭|饭类|便当|简餐/i,
+    match: /饭|盖浇|炒饭|便当|煲仔|黄焖|简餐/i,
+    keyword: "盖饭 炒饭 简餐 快餐",
+  },
+];
+
 export async function onRequestGet(context) {
   const url = new URL(context.request.url);
   const lat = Number(url.searchParams.get("lat"));
@@ -66,13 +132,29 @@ export async function onRequestGet(context) {
     const categoryCandidates = intent.targetCategory
       ? refinedCandidates.filter((poi) => matchesTargetCategory(poiSearchText(poi), intent))
       : [];
-    const categoryBaseCandidates = categoryCandidates.length >= 3 ? categoryCandidates : refinedCandidates;
+    if (intent.targetCategory && !categoryCandidates.length) {
+      const label = targetCategoryLabel(intent.targetCategory);
+      return json({
+        ok: false,
+        code: "NO_TARGET_CATEGORY",
+        message: `附近没有找到符合“${label}”的真实餐厅。我不会用其他餐馆凑数，可以换个位置、扩大范围，或者换一个餐类。`,
+        targetCategory: label,
+        searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
+      }, 404);
+    }
+
+    const categoryBaseCandidates = intent.targetCategory ? categoryCandidates : refinedCandidates;
     const intentCandidates = categoryBaseCandidates.filter((poi) => isIntentReasonable(poi, intent));
     const intentBaseCandidates = intentCandidates.length >= 4 ? intentCandidates : categoryBaseCandidates;
     const budgetCandidates = intentBaseCandidates.filter((poi) => isBudgetReasonable(poi, budget, strictText));
     const distanceCandidates = budgetCandidates.filter((poi) => isDistanceReasonable(poi, strictText));
-    const candidatePois =
-      distanceCandidates.length >= 6
+    const candidatePois = intent.targetCategory
+      ? distanceCandidates.length
+        ? distanceCandidates
+        : budgetCandidates.length
+          ? budgetCandidates
+          : intentBaseCandidates
+      : distanceCandidates.length >= 6
         ? distanceCandidates
         : budgetCandidates.length >= 6
           ? budgetCandidates
@@ -419,47 +501,24 @@ function buildPreferenceIntent(preference) {
 }
 
 function detectTargetCategory(text) {
-  if (/日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i.test(text)) return "japanese";
-  if (/韩餐|韩国料理|韩式|部队锅|石锅|拌饭|烤肉/i.test(text)) return "korean";
-  if (/火锅|涮锅|锅底|串串/i.test(text)) return "hotpot";
-  if (/烧烤|烤肉|烤串|烤鱼/i.test(text)) return "grill";
-  if (/粤菜|茶餐厅|港式|烧腊|点心/i.test(text)) return "cantonese";
-  if (/川菜|湘菜|麻辣|冒菜|酸菜鱼/i.test(text)) return "spicy_chinese";
-  if (/轻食|沙拉|健康餐|健身餐|低脂|低卡/i.test(text)) return "healthy";
-  if (/面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i.test(text)) return "noodle";
-  if (/米饭|盖饭|炒饭|饭类|便当|简餐/i.test(text)) return "rice";
-  return "";
+  return categoryRuleFromText(text)?.key || "";
 }
 
 function matchesTargetCategory(text, intent) {
   if (!intent.targetCategory) return true;
-  const patterns = {
-    japanese: /日料|日本料理|寿司|刺身|居酒屋|鳗鱼|拉面|日式|和食|豚骨/i,
-    korean: /韩餐|韩国料理|韩式|部队锅|石锅|拌饭|烤肉/i,
-    hotpot: /火锅|涮锅|锅底|串串/i,
-    grill: /烧烤|烤肉|烤串|烤鱼/i,
-    cantonese: /粤菜|茶餐厅|港式|烧腊|点心/i,
-    spicy_chinese: /川菜|湘菜|麻辣|冒菜|酸菜鱼/i,
-    healthy: /轻食|沙拉|健康餐|健身餐|低脂|低卡|鸡胸|牛肉|鱼|虾/i,
-    noodle: /面|粉|米线|馄饨|饺子|拉面|拌面/i,
-    rice: /饭|盖浇|炒饭|便当|煲仔|黄焖|简餐/i,
-  };
-  return patterns[intent.targetCategory]?.test(text) || false;
+  return categoryRuleFor(intent.targetCategory)?.match.test(text) || false;
 }
 
 function targetCategoryLabel(category) {
-  const labels = {
-    japanese: "日料",
-    korean: "韩餐",
-    hotpot: "火锅",
-    grill: "烧烤/烤肉",
-    cantonese: "粤菜/港式",
-    spicy_chinese: "川湘/麻辣",
-    healthy: "轻食健康餐",
-    noodle: "面食粉面",
-    rice: "米饭简餐",
-  };
-  return labels[category] || "";
+  return categoryRuleFor(category)?.label || "";
+}
+
+function categoryRuleFor(category) {
+  return CATEGORY_RULES.find((rule) => rule.key === category) || null;
+}
+
+function categoryRuleFromText(text) {
+  return CATEGORY_RULES.find((rule) => rule.detect.test(String(text || ""))) || null;
 }
 
 function poiSearchText(poi) {
@@ -795,16 +854,8 @@ function matchesTaste(poi, taste) {
 }
 
 function keywordFromTaste(taste, preferenceText = "") {
-  const targetCategory = detectTargetCategory(preferenceText);
-  if (targetCategory === "japanese") return "日料 日本料理 寿司 刺身 拉面";
-  if (targetCategory === "korean") return "韩餐 韩国料理 石锅拌饭 部队锅";
-  if (targetCategory === "hotpot") return "火锅 涮锅";
-  if (targetCategory === "grill") return "烧烤 烤肉 烤鱼";
-  if (targetCategory === "cantonese") return "粤菜 茶餐厅 港式 烧腊";
-  if (targetCategory === "spicy_chinese") return "川菜 湘菜 麻辣 冒菜";
-  if (targetCategory === "healthy") return "轻食 沙拉 健康餐 鸡胸 牛肉 鱼 虾";
-  if (targetCategory === "noodle") return "面馆 面食 米线 馄饨";
-  if (targetCategory === "rice") return "盖饭 炒饭 简餐 快餐";
+  const targetRule = categoryRuleFromText(preferenceText);
+  if (targetRule) return targetRule.keyword;
   if (/高蛋白|蛋白|低脂|减脂|低卡|少油|健康|轻食|健身|控卡/i.test(preferenceText)) return "轻食 沙拉 健康餐 鸡胸 牛肉 鱼 虾";
   if (taste.includes("辣")) return "川菜 湘菜 火锅";
   if (taste.includes("面")) return "面馆 面食";
