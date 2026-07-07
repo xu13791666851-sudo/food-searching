@@ -31,6 +31,36 @@ const OUT_CATEGORY_RULES = [
   { impliesOut: false, pattern: /轻食|沙拉|健康餐|健身餐|低脂|低卡/i },
   { impliesOut: false, pattern: /面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i },
   { impliesOut: false, pattern: /米饭|盖饭|炒饭|饭类|便当|简餐/i },
+  { impliesOut: true, pattern: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC/i },
+  { impliesOut: true, pattern: /汉堡|披萨|pizza|Pizza|必胜客|达美乐/i },
+  { impliesOut: true, pattern: /麻辣烫|冒菜|串串|关东煮/i },
+];
+
+const FOOD_TARGET_WORDS = [
+  "炸鸡",
+  "鸡排",
+  "鸡翅",
+  "汉堡",
+  "披萨",
+  "麻辣烫",
+  "冒菜",
+  "酸菜鱼",
+  "烤鱼",
+  "小龙虾",
+  "螺蛳粉",
+  "牛肉面",
+  "兰州拉面",
+  "寿司",
+  "刺身",
+  "石锅拌饭",
+  "拌饭",
+  "部队锅",
+  "咖喱",
+  "泰餐",
+  "越南粉",
+  "新疆菜",
+  "烤鸭",
+  "黄焖鸡",
 ];
 
 const fallbackHomeFoods = [
@@ -476,9 +506,9 @@ async function getAgentDecision(message) {
 function quickRepliesForDecision(decision) {
   if ((decision.missing || []).includes("mode")) return ["在家吃", "外面吃", "都可以，你帮我定"];
   if ((decision.missing || []).includes("budget") || (decision.missing || []).includes("time")) {
-    return ["30-60，15分钟内", "60-100，可以远一点", "越近越好", "没有要求"];
+    return ["可以，按默认", "30-60，15分钟内", "60-100，可以远一点", "越近越好"];
   }
-  return ["没有要求", "我再补一句", "重新开始"];
+  return ["可以，按默认", "我再补一句", "重新开始"];
 }
 
 function startRecommendation(decision, homeType) {
@@ -692,6 +722,16 @@ function localAgentDecision(message) {
   const text = String(message || "");
   const mode = inferMode(text);
   if (!mode) {
+    if (acceptsOpenChoice(text)) {
+      const preferences = normalizePreferences({ budget: "30-60 元", time: "15 分钟内" }, "out");
+      return {
+        ok: true,
+        action: "recommend",
+        mode: "out",
+        preferences,
+        reply: "那我先按外面吃来帮你定，人均 30-60 元、15 分钟内，找真实餐厅。如果不合适你再继续说，我会重筛。",
+      };
+    }
     return {
       ok: true,
       action: "ask",
@@ -700,12 +740,13 @@ function localAgentDecision(message) {
     };
   }
   const preferences = inferPreferences(text, mode);
-  const acceptsDefaults = /没有|无所谓|随便|都行|默认|你定|帮我定/i.test(text);
-  if (mode === "out" && acceptsDefaults) {
+  const target = detectFoodTarget(text);
+  const acceptsDefaults = acceptsDefaultRequest(text);
+  if (mode === "out" && (acceptsDefaults || target)) {
     if (!preferences.budget) preferences.budget = "30-60 元";
     if (!preferences.time) preferences.time = "15 分钟内";
   }
-  if (mode === "out" && !preferences.budget && !preferences.time && !acceptsDefaults) {
+  if (mode === "out" && !preferences.budget && !preferences.time && !acceptsDefaults && !target) {
     return {
       ok: true,
       action: "ask",
@@ -724,9 +765,20 @@ function localAgentDecision(message) {
   };
 }
 
+function acceptsDefaultRequest(text) {
+  const value = String(text || "").trim();
+  if (/没有要求|没要求|无所谓|随便|都行|默认|按默认|你定|帮我定|按你说的/i.test(value)) return true;
+  const lastReply = value.split(/[。！？!?]/).pop().trim();
+  return /^(可以|可以的|好|好的|行|行的|ok|OK|没问题|就这样)$/.test(lastReply);
+}
+
+function acceptsOpenChoice(text) {
+  return /都可以|随便|你定|帮我定/i.test(String(text || ""));
+}
+
 function inferMode(text) {
   if (/在家|家里|做饭|菜谱|自己做|冰箱|买菜|厨房|不想出门|做过|保存/i.test(text)) return "home";
-  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均|咖啡/i.test(text) || OUT_CATEGORY_RULES.some((rule) => rule.impliesOut && rule.pattern.test(text))) return "out";
+  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均|咖啡/i.test(text) || OUT_CATEGORY_RULES.some((rule) => rule.impliesOut && rule.pattern.test(text)) || detectFoodTarget(text)) return "out";
   return "";
 }
 
@@ -776,6 +828,26 @@ function buildSummary(mode, preferences) {
     return `我理解你想找外面吃，人均 ${preferences.budget}、${preferences.time}、偏向${preferences.taste}。我现在按这个找真实餐厅。`;
   }
   return `我理解你想在家吃，偏向${preferences.taste}、${preferences.time}、${preferences.health}。我现在按这个想菜。`;
+}
+
+function detectFoodTarget(text) {
+  const value = String(text || "");
+  const direct = value.match(/(?:想吃|要吃|找|搜|附近有没有|附近的)([^，。！？!?、\s]{2,14})/);
+  if (direct) {
+    const target = cleanFoodTarget(direct[1]);
+    if (target) return target;
+  }
+  const word = [...FOOD_TARGET_WORDS].sort((a, b) => b.length - a.length).find((item) => value.includes(item));
+  return word || "";
+}
+
+function cleanFoodTarget(text) {
+  const target = String(text || "")
+    .replace(/^(一个|一家|一些|一点|好吃的|附近的|能吃到的|没在列表里的|不在列表里的)+/g, "")
+    .replace(/(餐厅|饭店|店|外卖|附近|人均|预算|可以吗|有没有|有吗)$/g, "")
+    .trim();
+  if (!target || /外面吃|在家吃|今天|舒服点|随便|都可以|预算|距离/.test(target)) return "";
+  return target.slice(-8);
 }
 
 function loadJson(key, fallback) {
