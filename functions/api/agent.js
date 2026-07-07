@@ -20,6 +20,18 @@ const profiles = {
   },
 };
 
+const OUT_CATEGORY_RULES = [
+  { label: "日料", impliesOut: true, pattern: /日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i },
+  { label: "韩餐", impliesOut: true, pattern: /韩餐|韩国料理|韩式|部队锅|石锅|拌饭|泡菜/i },
+  { label: "火锅", impliesOut: true, pattern: /火锅|涮锅|锅底|串串/i },
+  { label: "烧烤/烤肉", impliesOut: true, pattern: /烧烤|烤肉|烤串|烤鱼/i },
+  { label: "粤菜/港式", impliesOut: true, pattern: /粤菜|茶餐厅|港式|烧腊|点心/i },
+  { label: "川湘/麻辣", impliesOut: true, pattern: /川菜|湘菜|麻辣|冒菜|酸菜鱼/i },
+  { label: "轻食健康餐", pattern: /轻食|沙拉|健康餐|健身餐|低脂|低卡/i },
+  { label: "面食粉面", pattern: /面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i },
+  { label: "米饭简餐", pattern: /米饭|盖饭|炒饭|饭类|便当|简餐/i },
+];
+
 export async function onRequestPost(context) {
   try {
     const body = await context.request.json();
@@ -76,8 +88,8 @@ function decide(message) {
 }
 
 function inferMode(text) {
-  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均|日料|日本料理|寿司|刺身|韩餐|韩国料理|火锅|烧烤|烤肉|轻食|沙拉|粤菜|川菜|湘菜/i.test(text)) return "out";
   if (/在家|家里|做饭|菜谱|自己做|冰箱|买菜|厨房/i.test(text)) return "home";
+  if (/外面|出去|餐厅|饭店|店|附近|堂食|下馆子|商场|人均/i.test(text) || hasOutOnlyCategory(text)) return "out";
   return "";
 }
 
@@ -171,19 +183,20 @@ function buildReply(message, mode, preferences) {
 }
 
 function targetCategorySummary(message) {
-  if (/日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i.test(message)) return "日料";
-  if (/韩餐|韩国料理|韩式|部队锅|石锅|拌饭/i.test(message)) return "韩餐";
-  if (/火锅|涮锅|锅底|串串/i.test(message)) return "火锅";
-  if (/烧烤|烤肉|烤串|烤鱼/i.test(message)) return "烧烤/烤肉";
-  if (/粤菜|茶餐厅|港式|烧腊/i.test(message)) return "粤菜/港式";
-  if (/川菜|湘菜|麻辣|冒菜|酸菜鱼/i.test(message)) return "川湘/麻辣";
-  if (/轻食|沙拉|健康餐|健身餐|低脂|低卡/i.test(message)) return "轻食健康餐";
-  return "";
+  return outCategoryRuleFromText(message)?.label || "";
+}
+
+function hasOutOnlyCategory(text) {
+  return Boolean(outCategoryRuleFromText(text, true));
+}
+
+function outCategoryRuleFromText(text, onlyOutImplied = false) {
+  return OUT_CATEGORY_RULES.find((rule) => (!onlyOutImplied || rule.impliesOut) && rule.pattern.test(String(text || ""))) || null;
 }
 
 function buildConstraintSummary(message) {
   const parts = [];
-  if (/高蛋白|蛋白|鸡胸|牛肉|鱼|虾/i.test(message)) parts.push("低蛋白选项");
+  if (/高蛋白|蛋白|鸡胸|牛肉|鱼|虾/i.test(message)) parts.push("低蛋白、少肉少海鲜的选项");
   if (/低脂|减脂|低卡|少油|健康|轻食/i.test(message)) parts.push("油腻和纯主食");
   if (/不要商场|不想去商场|别.*商场/i.test(message)) parts.push("商场店");
   if (/不要甜品|不要奶茶|不要咖啡|别.*甜品|别.*奶茶|别.*咖啡/i.test(message)) parts.push("饮品甜品");
