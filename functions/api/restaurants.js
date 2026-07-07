@@ -194,7 +194,7 @@ export async function onRequestGet(context) {
       ? refinedCandidates.filter((poi) => matchesTargetCategory(poiSearchText(poi), intent))
       : [];
     if ((intent.targetCategory || intent.targetKeyword) && !categoryCandidates.length) {
-      const label = targetCategoryLabel(intent.targetCategory) || intent.targetKeyword;
+      const label = intent.targetKeyword || targetCategoryLabel(intent.targetCategory);
       return json({
         ok: false,
         code: "NO_TARGET_CATEGORY",
@@ -587,9 +587,10 @@ function categoryRuleFromText(text) {
 
 function detectSearchKeyword(text) {
   const value = String(text || "");
-  const direct = value.match(/(?:想吃|要吃|找|搜|附近有没有|附近的)([^，。！？!?、\s]{2,14})/);
-  if (direct) {
-    const keyword = cleanFoodTarget(direct[1]);
+  const directMatches = [...value.matchAll(/(?:想吃|要吃|找|搜|附近有没有|附近的)([^，。！？!?、\s]{2,14})/g)];
+  const latestDirect = directMatches[directMatches.length - 1];
+  if (latestDirect) {
+    const keyword = cleanFoodTarget(latestDirect[1]);
     if (keyword) return keyword;
   }
   const explicitWord = [...FOOD_SEARCH_WORDS].sort((a, b) => b.length - a.length).find((word) => value.includes(word));
@@ -757,12 +758,10 @@ function intentScoreForText(text, intent) {
   if (!intent || !intent.text) return 0;
   let score = 0;
 
-  if (intent.targetCategory) {
-    score += matchesTargetCategory(text, intent) ? 180 : -140;
-  }
-
-  if (intent.targetKeyword && !intent.targetCategory) {
+  if (intent.targetKeyword) {
     score += matchesSearchKeyword(text, intent.targetKeyword) ? 160 : -120;
+  } else if (intent.targetCategory) {
+    score += matchesTargetCategory(text, intent) ? 180 : -140;
   }
 
   if (intent.wantsHealthy) {
