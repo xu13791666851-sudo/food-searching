@@ -29,6 +29,13 @@ body {
     Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+body.mobile-app-page {
+  overflow-x: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 248, 240, 0.99), rgba(255, 252, 248, 0.99)),
+    url("assets/prototype-home.png") center top / cover fixed;
+}
+
 button {
   font: inherit;
   cursor: pointer;
@@ -52,6 +59,12 @@ p {
     linear-gradient(180deg, rgba(255, 252, 248, 0.97), rgba(255, 248, 240, 0.96)),
     radial-gradient(circle at 94% 8%, rgba(232, 59, 47, 0.14), transparent 28%),
     radial-gradient(circle at 4% 18%, rgba(77, 141, 69, 0.13), transparent 24%);
+}
+
+body.mobile-app-page .app-shell {
+  width: min(430px, 100%);
+  max-width: 430px;
+  padding: 12px 12px calc(92px + env(safe-area-inset-bottom));
 }
 
 .hero {
@@ -492,6 +505,175 @@ p {
   line-height: 1.5;
   font-size: 14px;
   font-weight: 800;
+}
+
+.bottom-tab-bar {
+  position: fixed;
+  left: 50%;
+  right: auto;
+  bottom: 0;
+  z-index: 30;
+  width: min(430px, 100%);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  border-top: 2px solid var(--line);
+  background: rgba(255, 252, 248, 0.96);
+  box-shadow: 0 -10px 26px rgba(82, 52, 32, 0.12);
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.bottom-tab-bar a {
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  padding: 5px 2px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.bottom-tab-bar a span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.bottom-tab-bar a strong {
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.bottom-tab-bar a.active {
+  border-color: rgba(232, 59, 47, 0.24);
+  background: var(--surface-soft);
+  color: var(--tomato-dark);
+}
+
+.bottom-tab-bar a.active span {
+  background: var(--tomato);
+  color: #fff8df;
+}
+
+.tab-page-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.tab-page-hero {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background:
+    linear-gradient(90deg, var(--tomato) 0 10px, transparent 10px 24px) top left / 48px 14px repeat-x,
+    linear-gradient(180deg, #fff8df, #f8eccf);
+  box-shadow: 4px 4px 0 rgba(36, 31, 27, 0.12);
+}
+
+.tab-page-hero h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.08;
+}
+
+.tab-page-hero p:not(.eyebrow),
+.tab-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.tab-card {
+  display: grid;
+  gap: 11px;
+  padding: 14px;
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 3px 3px 0 rgba(36, 31, 27, 0.1);
+}
+
+.tab-card h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
+.primary-link-button {
+  min-height: 44px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 14px;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: var(--tomato);
+  color: #fff8df;
+  font-weight: 900;
+  text-decoration: none;
+  box-shadow: 3px 3px 0 #17130f;
+}
+
+.tab-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tab-chip-list span {
+  padding: 8px 10px;
+  border: 1px solid rgba(77, 141, 69, 0.3);
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: #2f6730;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.tab-prompt-list,
+.preference-memory-list {
+  display: grid;
+  gap: 8px;
+}
+
+.tab-prompt-list p,
+.preference-memory-list div {
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffaf4;
+}
+
+.preference-memory-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.preference-memory-list span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.preference-memory-list strong {
+  text-align: right;
+  font-size: 13px;
 }
 
 .ai-understanding-card {
@@ -1421,8 +1603,32 @@ figcaption {
     padding: 12px 10px 22px;
   }
 
+  body.mobile-app-page .app-shell {
+    padding: 10px 10px calc(90px + env(safe-area-inset-bottom));
+  }
+
   .hero h1 {
     font-size: 27px;
+  }
+
+  .agent-shell .agent-hero {
+    padding: 14px;
+  }
+
+  .agent-shell .agent-hero .hero-title {
+    font-size: 26px;
+  }
+
+  .agent-chat-panel {
+    padding: 11px;
+  }
+
+  .agent-composer {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-composer .primary-button {
+    width: 100%;
   }
 
   .chip-grid {
@@ -1895,6 +2101,62 @@ figure {
 
   .hero .hero-title {
     font-size: 48px;
+  }
+}
+
+@media (min-width: 900px) {
+  body.mobile-app-page {
+    min-height: 100vh;
+    display: block;
+    padding: 24px 0;
+  }
+
+  body.mobile-app-page .app-shell {
+    width: min(430px, calc(100% - 32px));
+    max-width: 430px;
+    min-height: calc(100vh - 48px);
+    display: block;
+    padding: 14px 14px calc(96px + env(safe-area-inset-bottom));
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    box-shadow: 0 24px 70px rgba(82, 52, 32, 0.18);
+  }
+
+  body.mobile-app-page .hero {
+    min-height: auto;
+    position: static;
+    display: block;
+  }
+
+  body.mobile-app-page .progress-wrap,
+  body.mobile-app-page .workspace {
+    grid-column: auto;
+  }
+
+  body.mobile-app-page .candidate-list,
+  body.mobile-app-page .big-choice-grid,
+  body.mobile-app-page .quick-grid,
+  body.mobile-app-page .chip-grid,
+  body.mobile-app-page .dish-list {
+    grid-template-columns: 1fr;
+  }
+
+  body.mobile-app-page .candidate {
+    grid-template-columns: 82px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  body.mobile-app-page .food-shot,
+  body.mobile-app-page .candidate-image {
+    width: 82px;
+    height: 82px;
+  }
+
+  body.mobile-app-page .hero h1,
+  body.mobile-app-page .hero .hero-title {
+    margin-top: 12px;
+    font-size: 30px;
+    line-height: 1.08;
   }
 }
 
