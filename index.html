@@ -6,7 +6,7 @@
     <title>今天吃什么</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body class="mobile-app-page">
     <main class="app-shell agent-shell">
       <header class="hero agent-hero">
         <div class="brand-row">
@@ -40,6 +40,13 @@
 
       <section class="workspace agent-workspace" id="workspace" aria-live="polite"></section>
     </main>
+
+    <nav class="bottom-tab-bar" aria-label="主导航">
+      <a class="active" href="index.html"><span>⌂</span><strong>首页</strong></a>
+      <a href="out.html"><span>⌕</span><strong>外面吃</strong></a>
+      <a href="home.html"><span>□</span><strong>在家吃</strong></a>
+      <a href="me.html"><span>♡</span><strong>我的</strong></a>
+    </nav>
 
     <script src="agent.js"></script>
   </body>
