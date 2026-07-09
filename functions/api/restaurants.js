@@ -154,7 +154,7 @@ export async function onRequestGet(context) {
     const intent = buildPreferenceIntent({ taste, budget, time, note, refine });
     const wantsWiderSearch = wantsFarther(strictText);
     const searchKeyword = refine.includes("不想吃这个口味") ? "" : intent.targetKeyword || keywordFromTaste(taste, strictText);
-    const primary = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
+    let result = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
       lat: searchPoint.lat,
       lng: searchPoint.lng,
       keyword: searchKeyword,
@@ -164,11 +164,8 @@ export async function onRequestGet(context) {
       pages: wantsWiderSearch ? 4 : 2,
     });
 
-    const result = primary.pois.length
-      ? primary
-      : searchKeyword
-        ? primary
-        : await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
+    if (!result.pois.length && !searchKeyword) {
+      result = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
           lat: searchPoint.lat,
           lng: searchPoint.lng,
           keyword: "",
@@ -177,6 +174,7 @@ export async function onRequestGet(context) {
           pageStart: batch * 2 + 1,
           pages: 3,
         });
+    }
 
     if (!result.ok) {
       return json({
@@ -186,21 +184,45 @@ export async function onRequestGet(context) {
       }, 502);
     }
 
-    const mealCandidates = result.pois
+    let mealCandidates = result.pois
       .filter((poi) => poi && poi.name)
       .filter((poi) => isMealRestaurant(poi));
-    const refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, strictText, budget));
-    const categoryCandidates = intent.targetCategory || intent.targetKeyword
+    let refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, strictText, budget));
+    let categoryCandidates = intent.targetCategory || intent.targetKeyword
       ? refinedCandidates.filter((poi) => matchesTargetCategory(poiSearchText(poi), intent))
       : [];
+
+    if ((intent.targetCategory || intent.targetKeyword) && !categoryCandidates.length && Number(result.radius) < 7000) {
+      const widerResult = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
+        lat: searchPoint.lat,
+        lng: searchPoint.lng,
+        keyword: searchKeyword,
+        radius: "7000",
+        offset: "25",
+        pageStart: 1,
+        pages: 4,
+      });
+
+      if (widerResult.ok) {
+        result = widerResult;
+        mealCandidates = result.pois
+          .filter((poi) => poi && poi.name)
+          .filter((poi) => isMealRestaurant(poi));
+        refinedCandidates = mealCandidates.filter((poi) => isRefineReasonable(poi, strictText, budget));
+        categoryCandidates = refinedCandidates.filter((poi) => matchesTargetCategory(poiSearchText(poi), intent));
+      }
+    }
+
     if ((intent.targetCategory || intent.targetKeyword) && !categoryCandidates.length) {
       const label = intent.targetKeyword || targetCategoryLabel(intent.targetCategory);
+      const radiusKm = formatRadius(result.radius);
       return json({
         ok: false,
         code: "NO_TARGET_CATEGORY",
-        message: `附近没有找到符合“${label}”的真实餐厅。我不会用其他餐馆凑数，可以换个位置、扩大范围，或者换一个想吃的东西。`,
+        message: `这次已经按当前位置搜到约 ${radiusKm}，没有找到符合“${label}”的真实餐厅。我不会用其他餐馆凑数，可以换个位置，或者换一个想吃的东西。`,
         targetCategory: label,
         searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
+        radius: result.radius,
       }, 404);
     }
 
@@ -550,7 +572,7 @@ function isMealRestaurant(poi) {
 function buildPreferenceIntent(preference) {
   const text = `${preference.refine || ""} ${preference.note || ""} ${preference.taste || ""} ${preference.time || ""} ${preference.budget || ""}`;
   const targetCategory = detectTargetCategory(text);
-  const targetKeyword = detectSearchKeyword(text);
+  const targetKeyword = targetCategory ? "" : detectSearchKeyword(text);
   return {
     text,
     targetCategory,
@@ -968,14 +990,21 @@ function radiusFromPreference(text) {
   const explicitDistance = extractMaxNumber(text, "米");
   if (Number.isFinite(explicitDistance)) return String(Math.min(Math.max(explicitDistance, 500), 10000));
   if (text.includes("越近越好") || text.includes("再近") || text.includes("近一点")) return "1200";
-  if (text.includes("15 分钟内")) return "1800";
   if (/扩大范围|多给几个|选择太少|不同类型/.test(String(text || ""))) return "7000";
   if (wantsFarther(text)) return "6000";
+  if (text.includes("15 分钟内")) return "1800";
   return "3000";
 }
 
 function wantsFarther(text) {
   return /可以走远点|走远点|远一点|远点|远一些|不介意远|远一点也行|稍微远/.test(String(text || ""));
+}
+
+function formatRadius(radius) {
+  const meters = Number(radius || 0);
+  if (!Number.isFinite(meters) || meters <= 0) return "当前范围";
+  if (meters >= 1000) return `${Number((meters / 1000).toFixed(1))} 公里`;
+  return `${Math.round(meters)} 米`;
 }
 
 function priceFromBudget(budget) {
