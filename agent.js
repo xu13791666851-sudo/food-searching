@@ -31,15 +31,22 @@ const OUT_CATEGORY_RULES = [
   { impliesOut: false, pattern: /轻食|沙拉|健康餐|健身餐|低脂|低卡/i },
   { impliesOut: false, pattern: /面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i },
   { impliesOut: false, pattern: /米饭|盖饭|炒饭|饭类|便当|简餐/i },
-  { impliesOut: true, pattern: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC/i },
+  { impliesOut: true, pattern: /炸鸡|鸡排|鸡翅|鸡腿(?!饭)|肯德基|kfc|KFC/i },
   { impliesOut: true, pattern: /汉堡|披萨|pizza|Pizza|必胜客|达美乐/i },
   { impliesOut: true, pattern: /麻辣烫|冒菜|串串|关东煮/i },
 ];
 
 const FOOD_TARGET_WORDS = [
+  "鸡腿饭",
+  "鸡排饭",
+  "鸡肉饭",
+  "猪脚饭",
+  "卤肉饭",
+  "黄焖鸡",
   "炸鸡",
   "鸡排",
   "鸡翅",
+  "鸡腿",
   "汉堡",
   "披萨",
   "麻辣烫",
@@ -60,7 +67,37 @@ const FOOD_TARGET_WORDS = [
   "越南粉",
   "新疆菜",
   "烤鸭",
-  "黄焖鸡",
+];
+
+const TARGET_PROFILES = [
+  {
+    pattern: /鸡腿饭|鸡排饭|鸡肉饭|猪脚饭|卤肉饭|盖饭|便当|黄焖鸡/i,
+    type: "dish",
+    searchTerms: ["沙县", "盖饭", "快餐", "简餐", "便当"],
+    storeTypes: ["沙县小吃", "盖饭", "快餐", "简餐", "便当"],
+    menuSignals: ["饭类", "盖饭", "便当", "小吃"],
+  },
+  {
+    pattern: /牛肉粉|牛肉面|米粉|米线|螺蛳粉|粉|面/i,
+    type: "dish",
+    searchTerms: ["面馆", "米粉", "米线", "粉面", "小吃"],
+    storeTypes: ["面馆", "粉面", "米粉", "米线", "小吃"],
+    menuSignals: ["粉面", "汤面", "小吃"],
+  },
+  {
+    pattern: /寿司|刺身|鳗鱼饭|烧鸟|拉面/i,
+    type: "dish",
+    searchTerms: ["日料", "日本料理", "寿司"],
+    storeTypes: ["日料", "日本料理", "居酒屋"],
+    menuSignals: ["寿司", "刺身", "日式"],
+  },
+  {
+    pattern: /炸鸡|鸡排|鸡翅|鸡腿(?!饭)/i,
+    type: "dish",
+    searchTerms: ["炸鸡", "鸡排", "小吃"],
+    storeTypes: ["炸鸡", "小吃", "快餐"],
+    menuSignals: ["炸鸡", "鸡排"],
+  },
 ];
 
 const fallbackHomeFoods = [
@@ -525,7 +562,7 @@ function startRecommendation(decision, homeType) {
   const preferences = normalizePreferences(decision.preferences || {}, mode);
   const summary = decision.reply || buildSummary(mode, preferences);
 
-  state.lastIntent = { mode, preferences, homeType, summary, note: state.context, refine: "", batch: 0 };
+  state.lastIntent = { mode, preferences, searchIntent: decision.searchIntent || buildLocalSearchIntent(state.context), homeType, summary, note: state.context, refine: "", batch: 0 };
   state.messages.push({ role: "assistant", text: summary });
   state.intentSummary = summary;
   state.quickReplies = refinementQuickReplies(mode);
@@ -590,6 +627,7 @@ async function loadNearbyRestaurants(options = {}) {
       note: intent.note,
       refine: intent.refine || "",
       batch: String(intent.batch || 0),
+      searchIntent: JSON.stringify(intent.searchIntent || buildLocalSearchIntent(intent.note || state.context)),
     });
     const response = await fetch(`/api/restaurants?${params.toString()}`);
     const data = await response.json();
@@ -597,7 +635,8 @@ async function loadNearbyRestaurants(options = {}) {
       throw new Error(data.message || "没有返回附近餐厅");
     }
     const radiusText = data.radius ? `，本次搜索约 ${formatRadius(data.radius)}` : "";
-    showCandidates("out", data.restaurants.slice(0, 6), `已按真实位置整理出 ${Math.min(data.restaurants.length, 6)} 个候选${radiusText}${data.ai ? "，AI 已帮你排序" : ""}。`);
+    const sourceText = data.foodSource === "amap-poi" ? "美食候选来自高德地点，路线用高德步行计算" : "美食候选和路线已分层处理";
+    showCandidates("out", data.restaurants.slice(0, 6), `已整理出 ${Math.min(data.restaurants.length, 6)} 个候选${radiusText}；${sourceText}${data.ai ? "，AI 已帮你排序" : ""}。`);
   } catch (error) {
     if (isTargetCategoryNoResult(error.message)) {
       showEmptyResult(error.message);
@@ -850,6 +889,43 @@ function detectFoodTarget(text) {
   }
   const word = [...FOOD_TARGET_WORDS].sort((a, b) => b.length - a.length).find((item) => value.includes(item));
   return word || "";
+}
+
+function buildLocalSearchIntent(message) {
+  const targetLabel = detectFoodTarget(message);
+  const categoryLabel = targetCategorySummary(message);
+  const profile = targetProfileFor(targetLabel);
+  const isCategory = !targetLabel && Boolean(categoryLabel);
+  const label = targetLabel || categoryLabel;
+  const baseTerms = label ? [label] : [];
+
+  return {
+    targetLabel: label,
+    targetType: isCategory ? "category" : label ? profile.type : "open",
+    searchTerms: [...new Set([...baseTerms, ...profile.searchTerms])].filter(Boolean),
+    storeTypes: profile.storeTypes,
+    menuSignals: profile.menuSignals,
+    avoidTerms: buildAvoidTerms(message),
+    reasoning: label ? `先理解为${isCategory ? "餐类" : "具体想吃的东西"}：${label}` : "没有明确点名，按普通正餐偏好找",
+  };
+}
+
+function targetProfileFor(target) {
+  const value = String(target || "");
+  return TARGET_PROFILES.find((profile) => profile.pattern.test(value)) || {
+    type: value ? "dish" : "open",
+    searchTerms: [],
+    storeTypes: [],
+    menuSignals: [],
+  };
+}
+
+function buildAvoidTerms(message) {
+  const terms = [];
+  if (/不要商场|不想去商场|别.*商场/i.test(message)) terms.push("商场");
+  if (/不要甜品|不要奶茶|不要咖啡|别.*甜品|别.*奶茶|别.*咖啡/i.test(message)) terms.push("甜品", "奶茶", "咖啡");
+  if (/不要辣|不辣/i.test(message)) terms.push("重辣", "麻辣");
+  return terms;
 }
 
 function cleanFoodTarget(text) {
