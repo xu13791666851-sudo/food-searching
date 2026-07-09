@@ -192,6 +192,8 @@ function render() {
   if (mockButton) mockButton.addEventListener("click", () => showCandidates("out", fallbackRestaurants, "先给你看模拟推荐。真实餐厅需要定位或部署接口。"));
   const retryButton = $("#agentRetryLocationBtn");
   if (retryButton) retryButton.addEventListener("click", () => startOutRecommendation(state.lastIntent));
+  const expandRangeButton = $("#agentExpandRangeBtn");
+  if (expandRangeButton) expandRangeButton.addEventListener("click", () => rerunWithRefinement("扩大范围，可以走远点", { advanceBatch: true }));
   const newChatButton = $("#agentNewChatBtn");
   if (newChatButton) newChatButton.addEventListener("click", resetAgent);
 }
@@ -247,6 +249,7 @@ function renderResultArea() {
         <h2>${escapeHtml(state.resultTitle || "附近暂时没找到")}</h2>
         <p class="muted-line">${escapeHtml(state.resultMessage || "我没有用其他餐馆凑推荐。你可以换个位置、扩大范围，或者换一个餐类。")}</p>
         <div class="location-actions">
+          <button class="primary-button" type="button" id="agentExpandRangeBtn">扩大到 7 公里再找</button>
           <button class="primary-button" type="button" id="agentRetryLocationBtn">重新获取定位</button>
           <button class="secondary-button" type="button" id="agentTestLocationBtn">用测试位置体验</button>
           <button class="secondary-button" type="button" id="agentNewChatBtn">重新说需求</button>
@@ -429,7 +432,7 @@ function handleResultFeedback(message) {
     return true;
   }
 
-  if (/扩大范围|范围大一点|远一点/i.test(message)) {
+  if (/扩大范围|扩大到|范围大一点|远一点|远点|7\s*公里|七\s*公里/i.test(message)) {
     rerunWithRefinement("扩大范围，可以走远点", { advanceBatch: true });
     return true;
   }
@@ -593,7 +596,8 @@ async function loadNearbyRestaurants(options = {}) {
     if (!response.ok || !data.ok || !Array.isArray(data.restaurants) || !data.restaurants.length) {
       throw new Error(data.message || "没有返回附近餐厅");
     }
-    showCandidates("out", data.restaurants.slice(0, 6), `已按真实位置整理出 ${Math.min(data.restaurants.length, 6)} 个候选${data.ai ? "，AI 已帮你排序" : ""}。`);
+    const radiusText = data.radius ? `，本次搜索约 ${formatRadius(data.radius)}` : "";
+    showCandidates("out", data.restaurants.slice(0, 6), `已按真实位置整理出 ${Math.min(data.restaurants.length, 6)} 个候选${radiusText}${data.ai ? "，AI 已帮你排序" : ""}。`);
   } catch (error) {
     if (isTargetCategoryNoResult(error.message)) {
       showEmptyResult(error.message);
@@ -656,11 +660,11 @@ function showLocationHelp(message) {
 function showEmptyResult(message) {
   state.busy = false;
   state.resultMode = "empty";
-  state.resultTitle = "附近暂时没找到匹配餐类";
+  state.resultTitle = "附近暂时没找到匹配目标";
   state.resultMessage = message;
   state.candidates = [];
   state.selectedId = "";
-  state.quickReplies = ["换个位置", "扩大范围", "换个餐类", "重新开始"];
+  state.quickReplies = ["扩大到 7 公里", "换个位置", "换个餐类", "重新开始"];
   render();
 }
 
@@ -872,6 +876,13 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function formatRadius(radius) {
+  const meters = Number(radius || 0);
+  if (!Number.isFinite(meters) || meters <= 0) return "当前范围";
+  if (meters >= 1000) return `${Number((meters / 1000).toFixed(1))} 公里`;
+  return `${Math.round(meters)} 米`;
 }
 
 render();
