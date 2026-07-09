@@ -30,15 +30,22 @@ const OUT_CATEGORY_RULES = [
   { label: "轻食健康餐", pattern: /轻食|沙拉|健康餐|健身餐|低脂|低卡/i },
   { label: "面食粉面", pattern: /面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i },
   { label: "米饭简餐", pattern: /米饭|盖饭|炒饭|饭类|便当|简餐/i },
-  { label: "炸鸡", impliesOut: true, pattern: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC/i },
+  { label: "炸鸡", impliesOut: true, pattern: /炸鸡|鸡排|鸡翅|鸡腿(?!饭)|肯德基|kfc|KFC/i },
   { label: "汉堡披萨", impliesOut: true, pattern: /汉堡|披萨|pizza|Pizza|必胜客|达美乐/i },
   { label: "麻辣烫冒菜", impliesOut: true, pattern: /麻辣烫|冒菜|串串|关东煮/i },
 ];
 
 const FOOD_TARGET_WORDS = [
+  "鸡腿饭",
+  "鸡排饭",
+  "鸡肉饭",
+  "猪脚饭",
+  "卤肉饭",
+  "黄焖鸡",
   "炸鸡",
   "鸡排",
   "鸡翅",
+  "鸡腿",
   "汉堡",
   "披萨",
   "麻辣烫",
@@ -59,7 +66,37 @@ const FOOD_TARGET_WORDS = [
   "越南粉",
   "新疆菜",
   "烤鸭",
-  "黄焖鸡",
+];
+
+const TARGET_PROFILES = [
+  {
+    pattern: /鸡腿饭|鸡排饭|鸡肉饭|猪脚饭|卤肉饭|盖饭|便当|黄焖鸡/i,
+    type: "dish",
+    searchTerms: ["沙县", "盖饭", "快餐", "简餐", "便当"],
+    storeTypes: ["沙县小吃", "盖饭", "快餐", "简餐", "便当"],
+    menuSignals: ["饭类", "盖饭", "便当", "小吃"],
+  },
+  {
+    pattern: /牛肉粉|牛肉面|米粉|米线|螺蛳粉|粉|面/i,
+    type: "dish",
+    searchTerms: ["面馆", "米粉", "米线", "粉面", "小吃"],
+    storeTypes: ["面馆", "粉面", "米粉", "米线", "小吃"],
+    menuSignals: ["粉面", "汤面", "小吃"],
+  },
+  {
+    pattern: /寿司|刺身|鳗鱼饭|烧鸟|拉面/i,
+    type: "dish",
+    searchTerms: ["日料", "日本料理", "寿司"],
+    storeTypes: ["日料", "日本料理", "居酒屋"],
+    menuSignals: ["寿司", "刺身", "日式"],
+  },
+  {
+    pattern: /炸鸡|鸡排|鸡翅|鸡腿(?!饭)/i,
+    type: "dish",
+    searchTerms: ["炸鸡", "鸡排", "小吃"],
+    storeTypes: ["炸鸡", "小吃", "快餐"],
+    menuSignals: ["炸鸡", "鸡排"],
+  },
 ];
 
 export async function onRequestPost(context) {
@@ -75,7 +112,8 @@ export async function onRequestPost(context) {
       });
     }
 
-    const decision = decide(message);
+    const aiDecision = await understandWithAi(context.env, message);
+    const decision = aiDecision || decide(message);
     return json({ ok: true, ...decision });
   } catch (error) {
     return json({ ok: false, message: "Agent could not understand this request." }, 400);
@@ -91,6 +129,7 @@ function decide(message) {
         action: "recommend",
         mode: "out",
         preferences,
+        searchIntent: buildSearchIntent(message),
         reply: "那我先按外面吃来帮你定，人均 30-60 元、15 分钟内，找真实餐厅。如果不合适你再继续说，我会重筛。",
       };
     }
@@ -119,12 +158,150 @@ function decide(message) {
   }
 
   const preferences = withDefaults(inferred, mode);
+  const searchIntent = mode === "out" ? buildSearchIntent(message) : null;
   return {
     action: "recommend",
     mode,
     preferences,
+    searchIntent,
     reply: buildReply(message, mode, preferences),
   };
+}
+
+async function understandWithAi(env, message) {
+  if (!env?.DEEPSEEK_API_KEY && !env?.OPENAI_API_KEY) return null;
+
+  try {
+    const aiResponse = env.DEEPSEEK_API_KEY
+      ? await callDeepSeek(env, message)
+      : await callOpenAI(env, message);
+    if (!aiResponse.ok) return null;
+    const parsed = parseJsonObject(aiResponse.text);
+    return normalizeAiDecision(parsed, message);
+  } catch {
+    return null;
+  }
+}
+
+async function callDeepSeek(env, message) {
+  const response = await fetch("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+      messages: buildUnderstandingMessages(message),
+      stream: false,
+    }),
+  });
+  if (!response.ok) return { ok: false, text: "" };
+  const data = await response.json();
+  return { ok: true, text: data.choices?.[0]?.message?.content || "" };
+}
+
+async function callOpenAI(env, message) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: env.OPENAI_MODEL || "gpt-4.1-mini",
+      input: buildUnderstandingMessages(message),
+    }),
+  });
+  if (!response.ok) return { ok: false, text: "" };
+  const data = await response.json();
+  return { ok: true, text: extractResponseText(data) };
+}
+
+function buildUnderstandingMessages(message) {
+  return [
+    {
+      role: "system",
+      content:
+        "你是吃饭决策 Agent 的意图理解层。你只负责把用户中文口语整理成结构化信息，不要编造餐厅。重要：区分具体菜品和餐类。比如“鸡腿饭”是菜品/饭类，可能在沙县、盖饭、快餐、便当店出现，不是炸鸡；“日料”是餐类；“牛肉粉”是菜品，可能在粉面/小吃店出现。只返回 JSON。",
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        user_message: message,
+        output_schema: {
+          action: "recommend 或 ask",
+          mode: "out/home/unknown",
+          missing: ["缺什么信息"],
+          preferences: {
+            mood: "一个人吃/和朋友吃/快速解决/想坐一会儿",
+            taste: "正餐饱腹/清淡点/重口味/汤汤水水/米饭类/面食类",
+            time: "越近越好/15 分钟内/可以走远点",
+            budget: "30 元内/30-60 元/60-100 元/今天可以贵点",
+            health: "不排队/可等 10 分钟/好吃可以等",
+          },
+          searchIntent: {
+            targetLabel: "用户真正想吃的东西，如 鸡腿饭",
+            targetType: "dish/category/store_type/open",
+            searchTerms: ["给地图搜索用的词"],
+            storeTypes: ["可能卖这个东西的店型"],
+            menuSignals: ["判断候选是否相关的词"],
+            avoidTerms: ["用户明确不要的东西"],
+            reasoning: "一句话说明你怎么理解",
+          },
+          reply: "给用户看的自然中文理解说明",
+        },
+      }),
+    },
+  ];
+}
+
+function normalizeAiDecision(parsed, message) {
+  const mode = parsed.mode === "home" ? "home" : parsed.mode === "out" ? "out" : inferMode(message);
+  if (!mode) {
+    return {
+      action: "ask",
+      missing: ["mode"],
+      reply: parsed.reply || "你想在家吃还是外面吃？如果外面吃，我可以按当前位置找真实餐厅。",
+    };
+  }
+
+  const preferences = withDefaults(parsed.preferences || inferPreferences(message, mode), mode);
+  const fallbackSearchIntent = mode === "out" ? buildSearchIntent(message) : null;
+  const searchIntent = mode === "out" ? normalizeSearchIntent(parsed.searchIntent, fallbackSearchIntent) : null;
+  const target = searchIntent?.targetLabel || detectFoodTarget(message) || targetCategorySummary(message);
+
+  return {
+    action: "recommend",
+    mode,
+    preferences,
+    searchIntent,
+    reply:
+      parsed.reply ||
+      (mode === "out"
+        ? `我先理解成你想找${target ? `“${target}”` : "外面吃"}，会按预算、距离和可能店型去找真实餐厅。`
+        : buildReply(message, mode, preferences)),
+  };
+}
+
+function normalizeSearchIntent(value, fallback) {
+  const safe = value && typeof value === "object" ? value : {};
+  const targetLabel = cleanText(safe.targetLabel || fallback?.targetLabel || "", 30);
+  const targetType = ["dish", "category", "store_type", "open"].includes(safe.targetType) ? safe.targetType : fallback?.targetType || "open";
+  return {
+    targetLabel,
+    targetType,
+    searchTerms: cleanList(safe.searchTerms, fallback?.searchTerms || []),
+    storeTypes: cleanList(safe.storeTypes, fallback?.storeTypes || []),
+    menuSignals: cleanList(safe.menuSignals, fallback?.menuSignals || []),
+    avoidTerms: cleanList(safe.avoidTerms, fallback?.avoidTerms || []),
+    reasoning: cleanText(safe.reasoning || fallback?.reasoning || "", 120),
+  };
+}
+
+function cleanList(value, fallback = []) {
+  const source = Array.isArray(value) && value.length ? value : fallback;
+  return [...new Set(source.map((item) => cleanText(item, 20)).filter(Boolean))].slice(0, 8);
 }
 
 function acceptsDefaultRequest(text) {
@@ -237,6 +414,43 @@ function buildReply(message, mode, preferences) {
   return `我理解你想在家吃，偏向${preferences.taste}、${preferences.time}、预算${preferences.budget}。我现在帮你想可执行的菜。`;
 }
 
+function buildSearchIntent(message) {
+  const targetLabel = detectFoodTarget(message);
+  const categoryLabel = targetCategorySummary(message);
+  const profile = targetProfileFor(targetLabel);
+  const isCategory = !targetLabel && Boolean(categoryLabel);
+  const label = targetLabel || categoryLabel;
+  const baseTerms = label ? [label] : [];
+
+  return {
+    targetLabel: label,
+    targetType: isCategory ? "category" : label ? profile.type : "open",
+    searchTerms: [...new Set([...baseTerms, ...profile.searchTerms])].filter(Boolean),
+    storeTypes: profile.storeTypes,
+    menuSignals: profile.menuSignals,
+    avoidTerms: buildAvoidTerms(message),
+    reasoning: label ? `先理解为${isCategory ? "餐类" : "具体想吃的东西"}：${label}` : "没有明确点名，按普通正餐偏好找",
+  };
+}
+
+function targetProfileFor(target) {
+  const value = String(target || "");
+  return TARGET_PROFILES.find((profile) => profile.pattern.test(value)) || {
+    type: value ? "dish" : "open",
+    searchTerms: [],
+    storeTypes: [],
+    menuSignals: [],
+  };
+}
+
+function buildAvoidTerms(message) {
+  const terms = [];
+  if (/不要商场|不想去商场|别.*商场/i.test(message)) terms.push("商场");
+  if (/不要甜品|不要奶茶|不要咖啡|别.*甜品|别.*奶茶|别.*咖啡/i.test(message)) terms.push("甜品", "奶茶", "咖啡");
+  if (/不要辣|不辣/i.test(message)) terms.push("重辣", "麻辣");
+  return terms;
+}
+
 function targetCategorySummary(message) {
   return outCategoryRuleFromText(message)?.label || "";
 }
@@ -277,6 +491,25 @@ function buildConstraintSummary(message) {
   if (/不要商场|不想去商场|别.*商场/i.test(message)) parts.push("商场店");
   if (/不要甜品|不要奶茶|不要咖啡|别.*甜品|别.*奶茶|别.*咖啡/i.test(message)) parts.push("饮品甜品");
   return parts.join("、");
+}
+
+function parseJsonObject(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const match = String(text || "").match(/\{[\s\S]*\}/);
+    return match ? JSON.parse(match[0]) : {};
+  }
+}
+
+function extractResponseText(data) {
+  if (typeof data.output_text === "string") return data.output_text;
+  if (!Array.isArray(data.output)) return "";
+  return data.output
+    .flatMap((item) => (Array.isArray(item.content) ? item.content : []))
+    .map((content) => content.text || "")
+    .join("\n")
+    .trim();
 }
 
 function cleanText(value, maxLength) {
