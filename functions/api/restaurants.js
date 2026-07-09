@@ -70,8 +70,8 @@ const CATEGORY_RULES = [
   {
     key: "fried_chicken",
     label: "炸鸡",
-    detect: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC/i,
-    match: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC|德克士|塔斯汀|华莱士/i,
+    detect: /炸鸡|鸡排|鸡翅|鸡腿(?!饭)|肯德基|kfc|KFC/i,
+    match: /炸鸡|鸡排|鸡翅|鸡腿(?!饭)|肯德基|kfc|KFC|德克士|塔斯汀|华莱士/i,
     keyword: "炸鸡 鸡排 鸡翅 肯德基",
   },
   {
@@ -91,9 +91,16 @@ const CATEGORY_RULES = [
 ];
 
 const FOOD_SEARCH_WORDS = [
+  "鸡腿饭",
+  "鸡排饭",
+  "鸡肉饭",
+  "猪脚饭",
+  "卤肉饭",
+  "黄焖鸡",
   "炸鸡",
   "鸡排",
   "鸡翅",
+  "鸡腿",
   "汉堡",
   "披萨",
   "麻辣烫",
@@ -124,7 +131,6 @@ const FOOD_SEARCH_WORDS = [
   "汤饭",
   "海南鸡饭",
   "沙县",
-  "黄焖鸡",
 ];
 
 export async function onRequestGet(context) {
@@ -138,6 +144,7 @@ export async function onRequestGet(context) {
   const note = cleanText(url.searchParams.get("note"), 200);
   const refine = cleanText(url.searchParams.get("refine"), 160);
   const coord = cleanText(url.searchParams.get("coord"), 20);
+  const searchIntent = parseSearchIntent(url.searchParams.get("searchIntent"));
   const batch = Math.max(0, Math.min(5, Number(url.searchParams.get("batch") || 0)));
 
   if (!context.env.AMAP_KEY) {
@@ -151,10 +158,10 @@ export async function onRequestGet(context) {
   try {
     const searchPoint = coord === "gcj02" ? { lat, lng } : wgs84ToGcj02(lat, lng);
     const strictText = `${refine} ${note} ${taste} ${time} ${budget}`;
-    const intent = buildPreferenceIntent({ taste, budget, time, note, refine });
+    const intent = buildPreferenceIntent({ taste, budget, time, note, refine, searchIntent });
     const wantsWiderSearch = wantsFarther(strictText);
-    const searchKeyword = refine.includes("不想吃这个口味") ? "" : intent.targetKeyword || keywordFromTaste(taste, strictText);
-    let result = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
+    const searchKeyword = refine.includes("不想吃这个口味") ? "" : keywordForIntent(intent, taste, strictText);
+    let result = await fetchFoodCandidatePool(context.env, {
       lat: searchPoint.lat,
       lng: searchPoint.lng,
       keyword: searchKeyword,
@@ -165,7 +172,7 @@ export async function onRequestGet(context) {
     });
 
     if (!result.pois.length && !searchKeyword) {
-      result = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
+      result = await fetchFoodCandidatePool(context.env, {
           lat: searchPoint.lat,
           lng: searchPoint.lng,
           keyword: "",
@@ -193,7 +200,7 @@ export async function onRequestGet(context) {
       : [];
 
     if ((intent.targetCategory || intent.targetKeyword) && !categoryCandidates.length && Number(result.radius) < 7000) {
-      const widerResult = await fetchAmapRestaurantPool(context.env.AMAP_KEY, {
+      const widerResult = await fetchFoodCandidatePool(context.env, {
         lat: searchPoint.lat,
         lng: searchPoint.lng,
         keyword: searchKeyword,
@@ -243,9 +250,9 @@ export async function onRequestGet(context) {
           ? budgetCandidates
           : intentBaseCandidates.length >= 6
             ? intentBaseCandidates
-            : mealCandidates;
-    const restaurants = sortPoisForPreference(candidatePois, { taste, budget, time, note, refine, intent })
-      .slice(0, 18)
+        : mealCandidates;
+    const routeReadyPois = await enrichPoisWithAmapRoutes(context.env.AMAP_KEY, searchPoint, sortPoisForPreference(candidatePois, { taste, budget, time, note, refine, intent }).slice(0, 18));
+    const restaurants = routeReadyPois
       .map((poi, index) => formatRestaurant(poi, index, { taste, budget, time, note, refine, intent }));
 
     if (!restaurants.length) {
@@ -269,10 +276,21 @@ export async function onRequestGet(context) {
       originalLocation: `${lng},${lat}`,
       accuracy: Number.isFinite(accuracy) ? accuracy : 0,
       radius: result.radius,
+      foodSource: result.foodSource || "amap-poi",
+      routeSource: "amap-walking",
     });
   } catch (error) {
     return json({ ok: false, message: "Restaurants could not be loaded." }, 500);
   }
+}
+
+async function fetchFoodCandidatePool(env, options) {
+  // Food candidates are intentionally isolated from routing. A Meituan/Dianping
+  // provider can be plugged in here later without changing ranking or route logic.
+  return fetchAmapRestaurantPool(env.AMAP_KEY, {
+    ...options,
+    foodSource: "amap-poi",
+  });
 }
 
 async function fetchAmapRestaurants(key, options) {
@@ -336,7 +354,62 @@ async function fetchAmapRestaurantPool(key, options) {
     ok: okResult.ok,
     pois,
     radius: options.radius,
+    foodSource: options.foodSource || "amap-poi",
   };
+}
+
+async function enrichPoisWithAmapRoutes(key, origin, pois) {
+  const routeTargets = pois
+    .filter((poi) => poi && poi.location)
+    .slice(0, 12);
+  if (!routeTargets.length) return pois;
+
+  const routes = await Promise.all(
+    routeTargets.map((poi) =>
+      fetchAmapWalkingRoute(key, {
+        origin,
+        destination: poi.location,
+      })
+    )
+  );
+  const routeById = new Map();
+  routeTargets.forEach((poi, index) => {
+    const route = routes[index];
+    if (route && route.ok) routeById.set(poi.id || `${poi.name}-${poi.address}`, route);
+  });
+
+  return pois.map((poi) => {
+    const route = routeById.get(poi.id || `${poi.name}-${poi.address}`);
+    if (!route) return poi;
+    return {
+      ...poi,
+      routeDistance: route.distance,
+      routeDuration: route.duration,
+      routeSource: "amap-walking",
+    };
+  });
+}
+
+async function fetchAmapWalkingRoute(key, { origin, destination }) {
+  try {
+    const routeUrl = new URL("https://restapi.amap.com/v3/direction/walking");
+    routeUrl.searchParams.set("key", key);
+    routeUrl.searchParams.set("origin", `${origin.lng},${origin.lat}`);
+    routeUrl.searchParams.set("destination", destination);
+    routeUrl.searchParams.set("output", "JSON");
+
+    const response = await fetch(routeUrl.toString());
+    const data = await response.json();
+    const path = data.route?.paths?.[0];
+    const distance = Number(path?.distance || 0);
+    const duration = Number(path?.duration || 0);
+    if (data.status !== "1" || !Number.isFinite(distance) || distance <= 0) {
+      return { ok: false };
+    }
+    return { ok: true, distance, duration };
+  } catch {
+    return { ok: false };
+  }
 }
 
 async function applyAiRecommendation(env, restaurants, preference) {
@@ -494,8 +567,11 @@ function parseJsonObject(text) {
 }
 
 function formatRestaurant(poi, index, preference) {
-  const distance = Number(poi.distance || 0);
-  const minutes = distance ? Math.max(3, Math.round(distance / 80)) : "未知";
+  const rawDistance = Number(poi.distance || 0);
+  const routeDistance = Number(poi.routeDistance || 0);
+  const distance = Number.isFinite(routeDistance) && routeDistance > 0 ? routeDistance : rawDistance;
+  const durationSeconds = Number(poi.routeDuration || 0);
+  const minutes = durationSeconds ? Math.max(1, Math.round(durationSeconds / 60)) : distance ? Math.max(3, Math.round(distance / 80)) : "未知";
   const rating = poi.biz_ext && poi.biz_ext.rating && poi.biz_ext.rating !== "[]" ? poi.biz_ext.rating : "";
   const cost = poi.biz_ext && poi.biz_ext.cost && poi.biz_ext.cost !== "[]" ? poi.biz_ext.cost : "";
   const type = String(poi.type || "餐饮").split(";").slice(-1)[0] || "餐饮";
@@ -506,11 +582,11 @@ function formatRestaurant(poi, index, preference) {
     id: `amap-${poi.id || index}`,
     name: cleanText(poi.name, 60),
     image,
-    source: `高德显示约 ${distance || "未知"}m · 真实餐厅`,
+    source: `${poi.routeSource ? "高德步行路线" : "高德附近距离"}约 ${distance || "未知"}m · 美食候选`,
     tag: type.slice(0, 4),
     reason: buildReason(poi, preference, minutes),
     price: cost ? `高德参考人均 ${cost} 元` : "价格未知",
-    time: typeof minutes === "number" ? `高德步行估算约 ${minutes} 分钟` : "路程未知",
+    time: typeof minutes === "number" ? `${poi.routeSource ? "高德路线" : "高德估算"}约 ${minutes} 分钟` : "路程未知",
     health: rating ? `高德评分 ${rating}` : "真实店铺 · 可再看评价",
     weather: cleanText(poi.address, 80) || "已根据你当前位置查找附近餐厅。",
     amapId: poi.id || "",
@@ -571,12 +647,19 @@ function isMealRestaurant(poi) {
 
 function buildPreferenceIntent(preference) {
   const text = `${preference.refine || ""} ${preference.note || ""} ${preference.taste || ""} ${preference.time || ""} ${preference.budget || ""}`;
-  const targetCategory = detectTargetCategory(text);
-  const targetKeyword = targetCategory ? "" : detectSearchKeyword(text);
+  const parsedIntent = preference.searchIntent || {};
+  const targetCategory = parsedIntent.targetType === "category" ? categoryKeyFromLabel(parsedIntent.targetLabel) || detectTargetCategory(text) : detectTargetCategory(text);
+  const targetKeyword = parsedIntent.targetType && parsedIntent.targetType !== "category" && parsedIntent.targetLabel ? parsedIntent.targetLabel : targetCategory ? "" : detectSearchKeyword(text);
   return {
     text,
     targetCategory,
     targetKeyword,
+    targetType: parsedIntent.targetType || (targetCategory ? "category" : targetKeyword ? "dish" : "open"),
+    searchTerms: cleanList(parsedIntent.searchTerms),
+    storeTypes: cleanList(parsedIntent.storeTypes),
+    menuSignals: cleanList(parsedIntent.menuSignals),
+    avoidTerms: cleanList(parsedIntent.avoidTerms),
+    reasoning: cleanText(parsedIntent.reasoning, 120),
     wantsHealthy: /高蛋白|蛋白|低脂|减脂|低卡|少油|健康|轻食|健身|控卡|清淡/i.test(text),
     wantsHighProtein: /高蛋白|蛋白质|补蛋白|鸡胸/i.test(text),
     wantsLowFat: /低脂|减脂|低卡|少油|健康|轻食|控卡|清淡/i.test(text),
@@ -590,7 +673,7 @@ function detectTargetCategory(text) {
 }
 
 function matchesTargetCategory(text, intent) {
-  if (intent.targetKeyword) return matchesSearchKeyword(text, intent.targetKeyword);
+  if (intent.targetKeyword) return matchesSearchKeyword(text, intent.targetKeyword, intent);
   if (intent.targetCategory) return categoryRuleFor(intent.targetCategory)?.match.test(text) || false;
   return true;
 }
@@ -599,8 +682,62 @@ function targetCategoryLabel(category) {
   return categoryRuleFor(category)?.label || "";
 }
 
+function keywordForIntent(intent, taste, preferenceText = "") {
+  if (intent.targetKeyword) return expandedKeywordForTarget(intent.targetKeyword, intent);
+  if (intent.searchTerms?.length || intent.storeTypes?.length) return [...(intent.searchTerms || []), ...(intent.storeTypes || [])].join(" ");
+  return keywordFromTaste(taste, preferenceText);
+}
+
+function expandedKeywordForTarget(keyword, intent = {}) {
+  return targetKeywordProfile(keyword, intent).search;
+}
+
+function targetKeywordProfile(keyword, intent = {}) {
+  const value = String(keyword || "");
+  if ((intent.searchTerms || []).length || (intent.storeTypes || []).length || (intent.menuSignals || []).length) {
+    const terms = [...new Set([...(intent.searchTerms || []), ...(intent.storeTypes || []), ...(intent.menuSignals || []), value].filter(Boolean))];
+    return {
+      search: terms.join(" "),
+      match: new RegExp(terms.map(escapeRegExp).join("|"), "i"),
+    };
+  }
+  if (/鸡腿饭|鸡排饭|鸡肉饭|猪脚饭|卤肉饭|盖饭|便当|黄焖鸡/i.test(value)) {
+    return {
+      search: `${value} 沙县 盖饭 快餐 简餐 便当`,
+      match: /鸡腿饭|鸡排饭|鸡肉饭|猪脚饭|卤肉饭|黄焖鸡|沙县|盖饭|便当|快餐|简餐|小吃|食堂|饭/i,
+    };
+  }
+  if (/牛肉粉|牛肉面|米粉|米线|螺蛳粉|粉|面/i.test(value)) {
+    return {
+      search: `${value} 面馆 米粉 米线 粉面`,
+      match: /牛肉粉|牛肉面|米粉|米线|螺蛳粉|粉|面馆|面|小吃/i,
+    };
+  }
+  if (/寿司|刺身|鳗鱼饭|烧鸟|拉面/i.test(value)) {
+    return {
+      search: `${value} 日料 日本料理 寿司`,
+      match: /寿司|刺身|鳗鱼饭|烧鸟|拉面|日料|日本料理|日式|和食|居酒屋/i,
+    };
+  }
+  if (/炸鸡|鸡排|鸡翅|鸡腿/i.test(value)) {
+    return {
+      search: `${value} 炸鸡 鸡排 小吃`,
+      match: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC|德克士|塔斯汀|华莱士|小吃/i,
+    };
+  }
+  return {
+    search: value,
+    match: new RegExp(escapeRegExp(value), "i"),
+  };
+}
+
 function categoryRuleFor(category) {
   return CATEGORY_RULES.find((rule) => rule.key === category) || null;
+}
+
+function categoryKeyFromLabel(label) {
+  const value = String(label || "");
+  return CATEGORY_RULES.find((rule) => rule.label === value || rule.detect.test(value))?.key || "";
 }
 
 function categoryRuleFromText(text) {
@@ -629,12 +766,41 @@ function cleanFoodTarget(text) {
   return keyword.slice(-8);
 }
 
-function matchesSearchKeyword(text, keyword) {
+function matchesSearchKeyword(text, keyword, intent = {}) {
   const value = String(text || "");
+  const profile = targetKeywordProfile(keyword, intent);
+  if (profile.match.test(value)) return true;
+  if ([...(intent.storeTypes || []), ...(intent.menuSignals || []), ...(intent.searchTerms || [])].some((term) => term && value.includes(term))) return true;
   return String(keyword || "")
     .split(/\s+/)
     .filter(Boolean)
     .some((part) => value.includes(part));
+}
+
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function parseSearchIntent(raw) {
+  try {
+    const parsed = JSON.parse(String(raw || "{}"));
+    if (!parsed || typeof parsed !== "object") return {};
+    return {
+      targetLabel: cleanText(parsed.targetLabel, 30),
+      targetType: cleanText(parsed.targetType, 20),
+      searchTerms: cleanList(parsed.searchTerms),
+      storeTypes: cleanList(parsed.storeTypes),
+      menuSignals: cleanList(parsed.menuSignals),
+      avoidTerms: cleanList(parsed.avoidTerms),
+      reasoning: cleanText(parsed.reasoning, 120),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function cleanList(value) {
+  return Array.isArray(value) ? [...new Set(value.map((item) => cleanText(item, 24)).filter(Boolean))].slice(0, 10) : [];
 }
 
 function poiSearchText(poi) {
@@ -644,6 +810,7 @@ function poiSearchText(poi) {
 function isIntentReasonable(poi, intent) {
   const text = poiSearchText(poi);
 
+  if ((intent.avoidTerms || []).some((term) => term && text.includes(term))) return false;
   if (intent.avoidsMall && /商场|购物中心|广场|mall/i.test(text)) return false;
   if (intent.avoidsSnack && /咖啡|奶茶|茶饮|甜品|蛋糕|面包|饮品|coffee|cafe/i.test(text)) return false;
   if (intent.wantsHealthy && isObviousHealthyMismatch(text)) return false;
@@ -781,7 +948,7 @@ function intentScoreForText(text, intent) {
   let score = 0;
 
   if (intent.targetKeyword) {
-    score += matchesSearchKeyword(text, intent.targetKeyword) ? 160 : -120;
+    score += matchesSearchKeyword(text, intent.targetKeyword, intent) ? 160 : -120;
   } else if (intent.targetCategory) {
     score += matchesTargetCategory(text, intent) ? 180 : -140;
   }
@@ -861,7 +1028,9 @@ function describeMatch({ cost, distance, poi, preference }) {
     else if (Number.isFinite(range.max) && cost > range.max) parts.push("高于预算区间");
   }
   if (intent.wantsHealthy && intentScoreForText(text, intent) > 35) parts.push("健康目标接近");
-  if (intent.targetKeyword && matchesSearchKeyword(text, intent.targetKeyword)) parts.push(`${intent.targetKeyword}接近`);
+  if (intent.targetKeyword && matchesSearchKeyword(text, intent.targetKeyword, intent)) {
+    parts.push(text.includes(intent.targetKeyword) ? `${intent.targetKeyword}接近` : `可能有${intent.targetKeyword}`);
+  }
   else if (intent.targetCategory && matchesTargetCategory(text, intent)) parts.push(`${targetCategoryLabel(intent.targetCategory)}接近`);
   if (matchesTaste(poi, preference.taste)) parts.push("口味接近");
   if (wantsFarther(`${preference.time || ""} ${preference.note || ""} ${preference.refine || ""}`)) {
@@ -886,7 +1055,7 @@ function restaurantProfile(poi, preference, minutes) {
   const category = restaurantCategory(poi);
   const rating = ratingValue(poi);
   const cost = costValue(poi);
-  const taste = tasteReason(poi, preference.taste);
+  const taste = tasteReason(poi, preference.taste, preference.intent);
   const distance = distanceReason(minutes);
   const price = priceReason(cost, preference.budget);
   const opening = openingReason({ category, taste: preference.taste, minutes, rating });
@@ -913,10 +1082,14 @@ function openingReason({ category, taste, minutes, rating }) {
   return category ? `这是一家附近的${category}` : "这是附近的一家真实餐厅";
 }
 
-function tasteReason(poi, taste) {
+function tasteReason(poi, taste, intent = {}) {
+  const text = poiSearchText(poi);
+  if (intent.targetKeyword && matchesSearchKeyword(text, intent.targetKeyword, intent)) {
+    return text.includes(intent.targetKeyword) ? `明确提到“${intent.targetKeyword}”` : `店型上可能有“${intent.targetKeyword}”`;
+  }
   if (!taste) return "";
   if (matchesTaste(poi, taste)) return `和“${taste}”比较接近`;
-  if (/日料|日本料理|寿司|刺身|居酒屋|鳗鱼|拉面|日式|和食/.test(poiSearchText(poi))) return "和日料方向比较接近";
+  if (/日料|日本料理|寿司|刺身|居酒屋|鳗鱼|拉面|日式|和食/.test(text)) return "和日料方向比较接近";
   if (taste.includes("清淡")) return "不一定完全命中清淡健康，但可作为附近正餐备选";
   if (taste.includes("米饭")) return "不一定完全命中米饭类，但可以作为附近正餐备选";
   if (taste.includes("面")) return "不一定完全命中面食，但可以作为附近正餐备选";
