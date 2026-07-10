@@ -82,6 +82,35 @@ AMAP_KEY
 
 保存后重新部署，用户在“外面吃”流程里授权定位后，页面会优先展示附近真实餐厅。如果用户拒绝定位，或者高德接口暂时失败，页面会自动回退到模拟推荐，不会影响试用。
 
+同一个 `AMAP_KEY` 也会用于顶部天气。Agent 页面拿到定位后，会自动显示当前城市、天气和温度。
+
+## 接入美团菜品查询
+
+外面吃现在也支持“美团查菜品 + 高德算路线”。
+
+如果你已经拿到美团技术服务合作中心的授权信息，在 Cloudflare Pages 项目里添加：
+
+```text
+MEITUAN_ENABLED=true
+MEITUAN_DEVELOPER_ID=你的开发者ID
+MEITUAN_SIGN_KEY=你的signKey
+MEITUAN_APP_AUTH_TOKEN=你的appAuthToken
+```
+
+可选添加：
+
+```text
+MEITUAN_BUSINESS_ID=18
+MEITUAN_AUTH_PAGE_SIZE=100
+MEITUAN_AUTH_MAX_PAGES=2
+MEITUAN_MENU_STORE_LIMIT=14
+MEITUAN_GOODS_PAGE_SIZE=100
+```
+
+保存后重新部署。之后用户说“鸡腿饭”“日料”“沙县”“牛肉粉”等时，系统会先查美团授权门店里的堂食/外卖菜品，再用高德计算路线。如果美团没有配置、权限不够，或者授权门店里没有匹配菜品，会自动继续用高德附近餐厅兜底。
+
+注意：美团这里查的是你的账号已授权门店和菜品，不等于美团 App 里的全量附近搜索。
+
 ## 初步 AI 推荐
 
 现在可以让 AI 参与“外面吃”的真实餐厅排序和推荐理由。
