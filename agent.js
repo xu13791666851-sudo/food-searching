@@ -19,6 +19,7 @@ const state = {
   selectedId: "",
   lastIntent: null,
   lastCoords: null,
+  weatherText: "天气读取中",
 };
 
 const OUT_CATEGORY_RULES = [
@@ -182,6 +183,7 @@ const fallbackRestaurants = [
 ];
 
 function render() {
+  updateWeatherStatus();
   updateProgress();
   $("#workspace").innerHTML = `
     <section class="agent-chat-panel">
@@ -233,6 +235,11 @@ function render() {
   if (expandRangeButton) expandRangeButton.addEventListener("click", () => rerunWithRefinement("扩大范围，可以走远点", { advanceBatch: true }));
   const newChatButton = $("#agentNewChatBtn");
   if (newChatButton) newChatButton.addEventListener("click", resetAgent);
+}
+
+function updateWeatherStatus() {
+  const weatherStatus = $("#weatherStatus");
+  if (weatherStatus) weatherStatus.textContent = state.weatherText || "天气暂不可用";
 }
 
 function updateProgress() {
@@ -591,7 +598,10 @@ function startOutRecommendation(intent) {
   }
 
   navigator.geolocation.getCurrentPosition(
-    (position) => loadNearbyRestaurants({ coords: position.coords }),
+    (position) => {
+      loadWeather(position.coords);
+      loadNearbyRestaurants({ coords: position.coords });
+    },
     () => showLocationHelp("还没有拿到定位授权，所以暂时不能按你身边的餐厅推荐。"),
     { enableHighAccuracy: true, timeout: 12000, maximumAge: 120000 }
   );
@@ -615,6 +625,7 @@ async function loadNearbyRestaurants(options = {}) {
     return;
   }
   state.lastCoords = coords;
+  loadWeather(coords);
 
   try {
     const params = new URLSearchParams({
@@ -635,7 +646,9 @@ async function loadNearbyRestaurants(options = {}) {
       throw new Error(data.message || "没有返回附近餐厅");
     }
     const radiusText = data.radius ? `，本次搜索约 ${formatRadius(data.radius)}` : "";
-    const sourceText = data.foodSource === "amap-poi" ? "美食候选来自高德地点，路线用高德步行计算" : "美食候选和路线已分层处理";
+    const sourceText = data.foodSource?.includes("meituan")
+      ? "美团先看菜品，高德再算路线；权限不足时会用高德补充"
+      : "美食候选来自高德地点，路线用高德步行计算";
     showCandidates("out", data.restaurants.slice(0, 6), `已整理出 ${Math.min(data.restaurants.length, 6)} 个候选${radiusText}；${sourceText}${data.ai ? "，AI 已帮你排序" : ""}。`);
   } catch (error) {
     if (isTargetCategoryNoResult(error.message)) {
@@ -644,6 +657,45 @@ async function loadNearbyRestaurants(options = {}) {
     }
     showCandidates("out", fallbackRestaurants, `真实餐厅暂时获取失败：${error.message}。先给你看模拟推荐。`);
   }
+}
+
+async function loadWeather(coords) {
+  if (!coords || !Number.isFinite(Number(coords.latitude)) || !Number.isFinite(Number(coords.longitude))) return;
+
+  try {
+    const params = new URLSearchParams({
+      lat: String(coords.latitude),
+      lng: String(coords.longitude),
+    });
+    const response = await fetch(`/api/weather?${params.toString()}`);
+    const data = await response.json();
+    if (!response.ok || !data.ok || !data.text) return;
+    state.weatherText = data.text;
+    updateWeatherStatus();
+  } catch {
+    state.weatherText = state.weatherText || "天气暂不可用";
+    updateWeatherStatus();
+  }
+}
+
+function initWeather() {
+  updateWeatherStatus();
+  if (!navigator.geolocation || !navigator.permissions) return;
+
+  navigator.permissions
+    .query({ name: "geolocation" })
+    .then((permission) => {
+      if (permission.state !== "granted") return;
+      navigator.geolocation.getCurrentPosition(
+        (position) => loadWeather(position.coords),
+        () => {
+          state.weatherText = "天气暂不可用";
+          updateWeatherStatus();
+        },
+        { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 }
+      );
+    })
+    .catch(() => {});
 }
 
 async function loadHomeRecipes(preferences) {
@@ -962,3 +1014,4 @@ function formatRadius(radius) {
 }
 
 render();
+initWeather();
