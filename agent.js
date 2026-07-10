@@ -19,7 +19,8 @@ const state = {
   selectedId: "",
   lastIntent: null,
   lastCoords: null,
-  weatherText: "天气读取中",
+  weatherText: "正在定位天气",
+  weatherSource: "",
 };
 
 const OUT_CATEGORY_RULES = [
@@ -599,7 +600,6 @@ function startOutRecommendation(intent) {
 
   navigator.geolocation.getCurrentPosition(
     (position) => {
-      loadWeather(position.coords);
       loadNearbyRestaurants({ coords: position.coords });
     },
     () => showLocationHelp("还没有拿到定位授权，所以暂时不能按你身边的餐厅推荐。"),
@@ -659,18 +659,22 @@ async function loadNearbyRestaurants(options = {}) {
   }
 }
 
-async function loadWeather(coords) {
+async function loadWeather(coords, options = {}) {
   try {
     const params = new URLSearchParams();
     if (coords && Number.isFinite(Number(coords.latitude)) && Number.isFinite(Number(coords.longitude))) {
       params.set("lat", String(coords.latitude));
       params.set("lng", String(coords.longitude));
+    } else if (!options.approximate) {
+      return;
     }
     const query = params.toString();
     const response = await fetch(`/api/weather${query ? `?${query}` : ""}`);
     const data = await response.json();
     if (!response.ok || !data.ok || !data.text) return;
-    state.weatherText = data.text;
+    if (data.source === "amap-ip" && state.weatherSource === "amap-regeo") return;
+    state.weatherText = data.source === "amap-ip" ? `大致：${data.text}` : data.text;
+    state.weatherSource = data.source || "";
     updateWeatherStatus();
   } catch {
     state.weatherText = state.weatherText || "天气暂不可用";
@@ -680,23 +684,20 @@ async function loadWeather(coords) {
 
 function initWeather() {
   updateWeatherStatus();
-  loadWeather();
-  if (!navigator.geolocation || !navigator.permissions) return;
+  if (!navigator.geolocation) {
+    loadWeather(null, { approximate: true });
+    return;
+  }
 
-  navigator.permissions
-    .query({ name: "geolocation" })
-    .then((permission) => {
-      if (permission.state !== "granted") return;
-      navigator.geolocation.getCurrentPosition(
-        (position) => loadWeather(position.coords),
-        () => {
-          state.weatherText = "天气暂不可用";
-          updateWeatherStatus();
-        },
-        { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 }
-      );
-    })
-    .catch(() => {});
+  navigator.geolocation.getCurrentPosition(
+    (position) => loadWeather(position.coords),
+    () => {
+      state.weatherText = "定位未授权，读取大致天气";
+      updateWeatherStatus();
+      loadWeather(null, { approximate: true });
+    },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 }
+  );
 }
 
 async function loadHomeRecipes(preferences) {
@@ -779,6 +780,7 @@ function resetAgent() {
     selectedId: "",
     lastIntent: null,
     lastCoords: null,
+    weatherSource: "",
   });
   render();
 }
