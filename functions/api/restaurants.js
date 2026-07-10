@@ -133,6 +133,12 @@ const FOOD_SEARCH_WORDS = [
   "沙县",
 ];
 
+const MEITUAN_HOST = "https://api-open-cater.meituan.com";
+const MEITUAN_BUSINESS_ID = "18";
+const MEITUAN_AUTH_POI_PATH = "/rms/base/v1/auth/resources/poi/get";
+const MEITUAN_DINE_IN_GOODS_PATH = "/rms/pos/api/v2/poi/goods/query";
+const MEITUAN_TAKEOUT_GOODS_PATH = "/rms/pos/api/v2/poi/goods/wmgoods/query";
+
 export async function onRequestGet(context) {
   const url = new URL(context.request.url);
   const lat = Number(url.searchParams.get("lat"));
@@ -169,6 +175,7 @@ export async function onRequestGet(context) {
       offset: "25",
       pageStart: batch * 2 + 1,
       pages: wantsWiderSearch ? 4 : 2,
+      intent,
     });
 
     if (!result.pois.length && !searchKeyword) {
@@ -180,6 +187,7 @@ export async function onRequestGet(context) {
           offset: "25",
           pageStart: batch * 2 + 1,
           pages: 3,
+          intent,
         });
     }
 
@@ -208,6 +216,7 @@ export async function onRequestGet(context) {
         offset: "25",
         pageStart: 1,
         pages: 4,
+        intent,
       });
 
       if (widerResult.ok) {
@@ -223,13 +232,15 @@ export async function onRequestGet(context) {
     if ((intent.targetCategory || intent.targetKeyword) && !categoryCandidates.length) {
       const label = intent.targetKeyword || targetCategoryLabel(intent.targetCategory);
       const radiusKm = formatRadius(result.radius);
+      const searchedText = (result.searchedKeywords || []).length ? `，并试过“${result.searchedKeywords.slice(0, 6).join("、")}”这些搜索词` : "";
       return json({
         ok: false,
         code: "NO_TARGET_CATEGORY",
-        message: `这次已经按当前位置搜到约 ${radiusKm}，没有找到符合“${label}”的真实餐厅。我不会用其他餐馆凑数，可以换个位置，或者换一个想吃的东西。`,
+        message: `这次已经按当前位置搜到约 ${radiusKm}${searchedText}，没有找到符合“${label}”的真实餐厅。我不会用其他餐馆凑数，可以换个位置，或者换一个想吃的东西。`,
         targetCategory: label,
         searchedLocation: `${searchPoint.lng},${searchPoint.lat}`,
         radius: result.radius,
+        searchedKeywords: result.searchedKeywords || [],
       }, 404);
     }
 
@@ -268,7 +279,7 @@ export async function onRequestGet(context) {
 
     return json({
       ok: true,
-      source: "amap",
+      source: result.foodSource?.includes("meituan") ? "meituan+amap" : "amap",
       restaurants: orderedRestaurants,
       ai: aiResult.used,
       aiStatus: aiResult.status,
@@ -278,6 +289,7 @@ export async function onRequestGet(context) {
       radius: result.radius,
       foodSource: result.foodSource || "amap-poi",
       routeSource: "amap-walking",
+      searchedKeywords: result.searchedKeywords || [],
     });
   } catch (error) {
     return json({ ok: false, message: "Restaurants could not be loaded." }, 500);
@@ -285,12 +297,305 @@ export async function onRequestGet(context) {
 }
 
 async function fetchFoodCandidatePool(env, options) {
-  // Food candidates are intentionally isolated from routing. A Meituan/Dianping
-  // provider can be plugged in here later without changing ranking or route logic.
-  return fetchAmapRestaurantPool(env.AMAP_KEY, {
+  const amapResultPromise = fetchAmapRestaurantPool(env.AMAP_KEY, {
     ...options,
     foodSource: "amap-poi",
   });
+
+  if (!hasMeituanConfig(env)) {
+    return amapResultPromise;
+  }
+
+  const [meituanResult, amapResult] = await Promise.all([
+    fetchMeituanRestaurantPool(env, options),
+    amapResultPromise,
+  ]);
+
+  if (meituanResult.ok && meituanResult.pois.length) {
+    const mergedPois = mergePoisByNameAndAddress([
+      ...meituanResult.pois,
+      ...(amapResult.ok ? amapResult.pois : []),
+    ]);
+    return {
+      ...meituanResult,
+      pois: mergedPois,
+      foodSource: amapResult.ok ? "meituan-menu+amap-poi" : "meituan-menu",
+      fallbackSource: amapResult.ok ? "amap-poi" : "",
+    };
+  }
+
+  return {
+    ...amapResult,
+    foodSource: amapResult.ok ? "amap-poi" : "meituan-unavailable",
+    meituanStatus: meituanResult.status || "",
+    meituanMessage: meituanResult.message || "",
+  };
+}
+
+function hasMeituanConfig(env) {
+  return (
+    String(env.MEITUAN_ENABLED || "").toLowerCase() === "true" &&
+    Boolean(env.MEITUAN_DEVELOPER_ID) &&
+    Boolean(env.MEITUAN_SIGN_KEY) &&
+    Boolean(env.MEITUAN_APP_AUTH_TOKEN)
+  );
+}
+
+async function fetchMeituanRestaurantPool(env, options) {
+  try {
+    const authPois = await fetchMeituanAuthorizedPois(env);
+    if (!authPois.ok) return authPois;
+
+    const nearbyPois = authPois.pois
+      .map((poi) => normalizeMeituanPoi(poi, options))
+      .filter((poi) => poi.name && poi.location)
+      .filter((poi) => !Number(options.radius) || poi.distance <= Number(options.radius))
+      .sort((a, b) => Number(a.distance || 0) - Number(b.distance || 0));
+
+    const menuLimit = Math.max(4, Math.min(30, Number(env.MEITUAN_MENU_STORE_LIMIT || 14)));
+    const intent = options.intent || {};
+    const menuChecks = await Promise.all(
+      nearbyPois.slice(0, menuLimit).map((poi) => enrichMeituanPoiWithMenus(env, poi, intent))
+    );
+
+    const targetPois = menuChecks.filter((poi) => isMeituanPoiUseful(poi, intent));
+    const openPois = intent.targetKeyword || intent.targetCategory ? targetPois : menuChecks;
+
+    return {
+      ok: true,
+      pois: openPois,
+      radius: options.radius,
+      foodSource: "meituan-menu",
+      status: targetPois.length ? "matched-menu" : "authorized-poi",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      pois: [],
+      radius: options.radius,
+      foodSource: "meituan-menu",
+      status: "meituan-error",
+      message: error.message || "Meituan request failed.",
+    };
+  }
+}
+
+async function fetchMeituanAuthorizedPois(env) {
+  const pageSize = Math.max(20, Math.min(200, Number(env.MEITUAN_AUTH_PAGE_SIZE || 100)));
+  const maxPages = Math.max(1, Math.min(5, Number(env.MEITUAN_AUTH_MAX_PAGES || 2)));
+  const pages = Array.from({ length: maxPages }, (_, index) => index + 1);
+  const responses = await Promise.all(
+    pages.map((pageNo) =>
+      callMeituanApi(env, MEITUAN_AUTH_POI_PATH, {
+        pageNo,
+        pageSize,
+      })
+    )
+  );
+  const success = responses.find((item) => item.ok);
+  if (!success) {
+    return {
+      ok: false,
+      pois: [],
+      status: responses[0]?.code || "meituan-auth-failed",
+      message: responses[0]?.message || "Meituan authorized stores could not be loaded.",
+    };
+  }
+
+  return {
+    ok: true,
+    pois: responses.flatMap((item) => (Array.isArray(item.data?.items) ? item.data.items : [])),
+  };
+}
+
+function normalizeMeituanPoi(raw, options) {
+  const lng = Number(raw.longitude || 0);
+  const lat = Number(raw.latitude || 0);
+  const distance = Number.isFinite(lat) && Number.isFinite(lng) && lat && lng
+    ? Math.round(distanceBetweenMeters(options.lat, options.lng, lat, lng))
+    : 0;
+  const brandName = cleanText(raw.brandName, 40);
+  const poiName = cleanText(raw.poiName || raw.name, 60);
+  const name = brandName && !poiName.includes(brandName) ? `${brandName}${poiName ? `（${poiName}）` : ""}` : poiName || brandName;
+
+  return {
+    id: `meituan-${raw.orgId || raw.orgCode || name}`,
+    meituanOrgId: raw.orgId,
+    meituanRaw: raw,
+    name,
+    type: cleanText([brandName, "美团授权门店"].filter(Boolean).join(";"), 80),
+    address: cleanText(raw.address, 120),
+    location: lat && lng ? `${lng},${lat}` : "",
+    distance,
+    photos: [],
+    biz_ext: {},
+    openStatus: raw.openStatus,
+    poiStatus: raw.poiStatus,
+    foodSource: "meituan-menu",
+  };
+}
+
+async function enrichMeituanPoiWithMenus(env, poi, intent) {
+  if (!poi.meituanOrgId) return poi;
+
+  const [takeout, dineIn] = await Promise.all([
+    fetchMeituanTakeoutGoods(env, poi.meituanOrgId),
+    fetchMeituanDineInGoods(env, poi.meituanOrgId),
+  ]);
+  const dishes = [...takeout, ...dineIn];
+  const matches = dishes.filter((dish) => matchesMeituanDish(dish, poi, intent));
+  const price = firstFiniteNumber(matches.map((dish) => dish.priceYuan)) || firstFiniteNumber(dishes.map((dish) => dish.priceYuan));
+  const dishNames = dishes.map((dish) => dish.name).filter(Boolean).slice(0, 12);
+  const matchedNames = matches.map((dish) => dish.name).filter(Boolean).slice(0, 6);
+
+  return {
+    ...poi,
+    type: cleanText([poi.type, ...matchedNames, ...dishNames.slice(0, 4)].filter(Boolean).join(";"), 160),
+    meituanDishes: dishes,
+    meituanMatchedDishes: matches,
+    meituanDishNames: dishNames,
+    meituanMatchedDishNames: matchedNames,
+    biz_ext: {
+      ...poi.biz_ext,
+      cost: price ? String(Math.round(price)) : "",
+    },
+  };
+}
+
+async function fetchMeituanTakeoutGoods(env, orgId) {
+  const response = await callMeituanApi(env, MEITUAN_TAKEOUT_GOODS_PATH, {
+    orgId,
+    req: {
+      wmSource: 1,
+      pageNo: 1,
+      pageSize: Number(env.MEITUAN_GOODS_PAGE_SIZE || 100),
+      spuTypes: [10, 20],
+    },
+  });
+  const goods = Array.isArray(response.data?.goods) ? response.data.goods : [];
+  return goods.map((item) => ({
+    source: "外卖菜品",
+    name: cleanText(item.spuName, 80),
+    category: cleanText(item.categoryName, 40),
+    priceYuan: centsToYuan(firstFiniteNumber((item.skus || []).map((sku) => sku.price))),
+  }));
+}
+
+async function fetchMeituanDineInGoods(env, orgId) {
+  const response = await callMeituanApi(env, MEITUAN_DINE_IN_GOODS_PATH, {
+    orgId,
+    req: {
+      spuType: 10,
+      pageNo: 1,
+      pageSize: Number(env.MEITUAN_GOODS_PAGE_SIZE || 100),
+    },
+  });
+  const goods = Array.isArray(response.data?.poiSimpleSpuTOs) ? response.data.poiSimpleSpuTOs : [];
+  return goods.map((item) => ({
+    source: "堂食菜品",
+    name: cleanText(item.name, 80),
+    category: cleanText(
+      (item.channelCategories || []).map((category) => category.categoryName || category.firstCategoryName || category.secondCategoryName).filter(Boolean).join(" "),
+      80
+    ),
+    priceYuan: centsToYuan(firstFiniteNumber((item.poiSpuPriceTOs || item.poiSkuTOs || []).map((sku) => sku.price))),
+  }));
+}
+
+function matchesMeituanDish(dish, poi, intent) {
+  if (!intent.targetKeyword && !intent.targetCategory && !(intent.menuSignals || []).length) return true;
+  const text = `${dish.name || ""} ${dish.category || ""} ${poi.name || ""} ${poi.address || ""}`;
+  if ((intent.avoidTerms || []).some((term) => term && text.includes(term))) return false;
+  if (intent.targetKeyword && matchesSearchKeyword(text, intent.targetKeyword, intent)) return true;
+  if (intent.targetCategory && matchesTargetCategory(text, intent)) return true;
+  return (intent.menuSignals || []).some((term) => term && text.includes(term));
+}
+
+function isMeituanPoiUseful(poi, intent) {
+  if (!poi.meituanDishes) return false;
+  if (!intent.targetKeyword && !intent.targetCategory) return true;
+  if (poi.meituanMatchedDishes?.length) return true;
+  return matchesTargetCategory(poiSearchText(poi), intent);
+}
+
+async function callMeituanApi(env, path, biz) {
+  const bizText = JSON.stringify(biz || {});
+  const params = {
+    appAuthToken: String(env.MEITUAN_APP_AUTH_TOKEN || ""),
+    businessId: String(env.MEITUAN_BUSINESS_ID || MEITUAN_BUSINESS_ID),
+    charset: "utf-8",
+    developerId: String(env.MEITUAN_DEVELOPER_ID || ""),
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    version: "2",
+    biz: bizText,
+  };
+  params.sign = await createMeituanSign(String(env.MEITUAN_SIGN_KEY || ""), params);
+
+  const response = await fetch(`${MEITUAN_HOST}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+    },
+    body: new URLSearchParams(params).toString(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.code !== "OP_SUCCESS") {
+    return {
+      ok: false,
+      code: data.code || `HTTP_${response.status}`,
+      message: data.msg || "Meituan request failed.",
+      data: data.data,
+    };
+  }
+  return { ok: true, code: data.code, message: data.msg, data: data.data };
+}
+
+async function createMeituanSign(signKey, params) {
+  const sorted = Object.keys(params)
+    .filter((key) => key.toLowerCase() !== "sign" && params[key] !== null && params[key] !== undefined && params[key] !== "")
+    .sort()
+    .map((key) => `${key}${params[key]}`)
+    .join("");
+  return sha1Hex(`${signKey}${sorted}`);
+}
+
+async function sha1Hex(value) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-1", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function mergePoisByNameAndAddress(pois) {
+  const seen = new Set();
+  return pois.filter((poi) => {
+    const key = `${cleanText(poi.name, 60)}|${cleanText(poi.address, 80)}`.toLowerCase();
+    if (!key.trim() || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function firstFiniteNumber(values) {
+  return values.find((value) => Number.isFinite(Number(value)) && Number(value) > 0);
+}
+
+function centsToYuan(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number / 100 : 0;
+}
+
+function distanceBetweenMeters(lat1, lng1, lat2, lng2) {
+  const earthRadius = 6371000;
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toRadians(value) {
+  return (Number(value) * Math.PI) / 180;
 }
 
 async function fetchAmapRestaurants(key, options) {
@@ -330,12 +635,16 @@ async function fetchAmapRestaurants(key, options) {
 
 async function fetchAmapRestaurantPool(key, options) {
   const pages = Array.from({ length: options.pages || 1 }, (_, index) => String((options.pageStart || 1) + index));
+  const keywords = amapQueryKeywords(options);
   const results = await Promise.all(
-    pages.map((page) =>
-      fetchAmapRestaurants(key, {
-        ...options,
-        page,
-      })
+    keywords.flatMap((keyword) =>
+      pages.map((page) =>
+        fetchAmapRestaurants(key, {
+          ...options,
+          keyword,
+          page,
+        })
+      )
     )
   );
   const okResult = results.find((item) => item.ok) || results[0] || { ok: false, pois: [] };
@@ -355,6 +664,7 @@ async function fetchAmapRestaurantPool(key, options) {
     pois,
     radius: options.radius,
     foodSource: options.foodSource || "amap-poi",
+    searchedKeywords: keywords,
   };
 }
 
@@ -577,17 +887,22 @@ function formatRestaurant(poi, index, preference) {
   const type = String(poi.type || "餐饮").split(";").slice(-1)[0] || "餐饮";
   const image = getPoiPhoto(poi);
   const numericCost = Number(cost || 0);
+  const isMeituan = String(poi.foodSource || "").includes("meituan") || String(poi.id || "").startsWith("meituan-");
+  const matchedDishes = Array.isArray(poi.meituanMatchedDishNames) ? poi.meituanMatchedDishNames.filter(Boolean) : [];
+  const dishText = matchedDishes.length ? ` · 菜单命中：${matchedDishes.slice(0, 3).join("、")}` : "";
 
   return {
-    id: `amap-${poi.id || index}`,
+    id: `${isMeituan ? "meituan" : "amap"}-${poi.id || index}`,
     name: cleanText(poi.name, 60),
     image,
-    source: `${poi.routeSource ? "高德步行路线" : "高德附近距离"}约 ${distance || "未知"}m · 美食候选`,
+    source: `${poi.routeSource ? "高德步行路线" : "高德附近距离"}约 ${distance || "未知"}m · ${isMeituan ? "美团菜品候选" : "美食候选"}${dishText}`,
     tag: type.slice(0, 4),
-    reason: buildReason(poi, preference, minutes),
-    price: cost ? `高德参考人均 ${cost} 元` : "价格未知",
+    reason: isMeituan && matchedDishes.length
+      ? `菜单里能看到“${matchedDishes.slice(0, 2).join("、")}”，比只看店名更接近你的要求。${typeof minutes === "number" ? `高德路线约 ${minutes} 分钟。` : ""}`
+      : buildReason(poi, preference, minutes),
+    price: cost ? `${isMeituan ? "美团菜品参考" : "高德参考人均"} ${cost} 元` : "价格未知",
     time: typeof minutes === "number" ? `${poi.routeSource ? "高德路线" : "高德估算"}约 ${minutes} 分钟` : "路程未知",
-    health: rating ? `高德评分 ${rating}` : "真实店铺 · 可再看评价",
+    health: rating ? `高德评分 ${rating}` : isMeituan ? "美团授权门店 · 已看菜品" : "真实店铺 · 可再看评价",
     weather: cleanText(poi.address, 80) || "已根据你当前位置查找附近餐厅。",
     amapId: poi.id || "",
     address: cleanText(poi.address, 80),
@@ -694,41 +1009,68 @@ function expandedKeywordForTarget(keyword, intent = {}) {
 
 function targetKeywordProfile(keyword, intent = {}) {
   const value = String(keyword || "");
-  if ((intent.searchTerms || []).length || (intent.storeTypes || []).length || (intent.menuSignals || []).length) {
-    const terms = [...new Set([...(intent.searchTerms || []), ...(intent.storeTypes || []), ...(intent.menuSignals || []), value].filter(Boolean))];
+  const terms = targetKeywordTerms(value, intent);
+  if (terms.length) {
     return {
       search: terms.join(" "),
       match: new RegExp(terms.map(escapeRegExp).join("|"), "i"),
-    };
-  }
-  if (/鸡腿饭|鸡排饭|鸡肉饭|猪脚饭|卤肉饭|盖饭|便当|黄焖鸡/i.test(value)) {
-    return {
-      search: `${value} 沙县 盖饭 快餐 简餐 便当`,
-      match: /鸡腿饭|鸡排饭|鸡肉饭|猪脚饭|卤肉饭|黄焖鸡|沙县|盖饭|便当|快餐|简餐|小吃|食堂|饭/i,
-    };
-  }
-  if (/牛肉粉|牛肉面|米粉|米线|螺蛳粉|粉|面/i.test(value)) {
-    return {
-      search: `${value} 面馆 米粉 米线 粉面`,
-      match: /牛肉粉|牛肉面|米粉|米线|螺蛳粉|粉|面馆|面|小吃/i,
-    };
-  }
-  if (/寿司|刺身|鳗鱼饭|烧鸟|拉面/i.test(value)) {
-    return {
-      search: `${value} 日料 日本料理 寿司`,
-      match: /寿司|刺身|鳗鱼饭|烧鸟|拉面|日料|日本料理|日式|和食|居酒屋/i,
-    };
-  }
-  if (/炸鸡|鸡排|鸡翅|鸡腿/i.test(value)) {
-    return {
-      search: `${value} 炸鸡 鸡排 小吃`,
-      match: /炸鸡|鸡排|鸡翅|鸡腿|肯德基|kfc|KFC|德克士|塔斯汀|华莱士|小吃/i,
     };
   }
   return {
     search: value,
     match: new RegExp(escapeRegExp(value), "i"),
   };
+}
+
+function targetKeywordTerms(keyword, intent = {}) {
+  const value = String(keyword || "");
+  const inferred = defaultTargetTerms(value);
+  const provided = [...(intent.searchTerms || []), ...(intent.storeTypes || []), ...(intent.menuSignals || [])];
+  return [...new Set([value, ...inferred, ...provided].map((item) => cleanText(item, 24)).filter(Boolean))].slice(0, 12);
+}
+
+function defaultTargetTerms(value) {
+  if (/鸡腿饭|鸡排饭|鸡肉饭|猪脚饭|卤肉饭|盖饭|便当|黄焖鸡/i.test(value)) {
+    return ["沙县", "盖饭", "快餐", "简餐", "便当", "黄焖鸡", "饭类", "小吃", "食堂"];
+  }
+  if (/牛肉粉|牛肉面|米粉|米线|螺蛳粉|粉|面/i.test(value)) {
+    return ["面馆", "米粉", "米线", "粉面", "小吃", "兰州拉面"];
+  }
+  if (/寿司|刺身|鳗鱼饭|烧鸟|拉面/i.test(value)) {
+    return ["日料", "日本料理", "寿司", "日式", "和食", "居酒屋"];
+  }
+  if (/炸鸡|鸡排|鸡翅|鸡腿/i.test(value)) {
+    return ["炸鸡", "鸡排", "小吃", "肯德基", "德克士", "塔斯汀", "华莱士"];
+  }
+  return [];
+}
+
+function amapQueryKeywords(options) {
+  const intent = options.intent || {};
+  const terms = [];
+
+  if (intent.targetKeyword) {
+    terms.push(...targetKeywordTerms(intent.targetKeyword, intent));
+  } else if (intent.targetCategory) {
+    const rule = categoryRuleFor(intent.targetCategory);
+    terms.push(intent.targetLabel || "", rule?.label || "", ...(rule?.keyword ? splitKeywordText(rule.keyword) : []));
+  } else {
+    terms.push(...splitKeywordText(options.keyword));
+  }
+
+  terms.push(...splitKeywordText(options.keyword));
+
+  const cleanTerms = [...new Set(terms.map((item) => cleanText(item, 24)).filter(Boolean))]
+    .filter((term) => !/饭类|菜品|菜单|餐类|目标/.test(term));
+  if (!cleanTerms.length) return [""];
+  return cleanTerms.slice(0, 6);
+}
+
+function splitKeywordText(value) {
+  return String(value || "")
+    .split(/[\s,，、;；|/]+/)
+    .map((item) => cleanText(item, 24))
+    .filter(Boolean);
 }
 
 function categoryRuleFor(category) {
