@@ -5,19 +5,43 @@ const jsonHeaders = {
 
 export async function onRequestGet(context) {
   const url = new URL(context.request.url);
-  const lat = Number(url.searchParams.get("lat"));
-  const lng = Number(url.searchParams.get("lng"));
+  const rawLat = url.searchParams.get("lat");
+  const rawLng = url.searchParams.get("lng");
+  const lat = Number(rawLat);
+  const lng = Number(rawLng);
+  const hasCoords = rawLat !== null && rawLng !== null && Number.isFinite(lat) && Number.isFinite(lng);
   const coord = cleanText(url.searchParams.get("coord"), 20);
 
   if (!context.env.AMAP_KEY) {
     return json({ ok: false, message: "AMAP_KEY is not configured." }, 500);
   }
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return json({ ok: false, message: "Location is required." }, 400);
-  }
-
   try {
+    if (!hasCoords) {
+      const ipPlace = await locateByIp(context.env.AMAP_KEY);
+      const cityCode = ipPlace.adcode || ipPlace.citycode;
+      if (!cityCode) {
+        return json({ ok: false, message: "Weather city could not be detected." }, 404);
+      }
+      const weather = await fetchAmapWeather(context.env.AMAP_KEY, cityCode);
+      if (!weather) {
+        return json({ ok: false, message: "Weather could not be loaded." }, 404);
+      }
+      return json({
+        ok: true,
+        city: cleanText(weather.city || ipPlace.city || ipPlace.province || "当前位置", 40),
+        district: "",
+        weather: cleanText(weather.weather, 40),
+        temperature: cleanText(weather.temperature, 10),
+        windDirection: cleanText(weather.winddirection, 20),
+        windPower: cleanText(weather.windpower, 20),
+        humidity: cleanText(weather.humidity, 10),
+        reportTime: cleanText(weather.reporttime, 40),
+        source: "amap-ip",
+        text: formatWeatherText(weather, ipPlace),
+      });
+    }
+
     const point = coord === "gcj02" ? { lat, lng } : wgs84ToGcj02(lat, lng);
     const place = await reverseGeocode(context.env.AMAP_KEY, point);
     const cityCode = place.adcode || place.citycode;
@@ -40,11 +64,28 @@ export async function onRequestGet(context) {
       windPower: cleanText(weather.windpower, 20),
       humidity: cleanText(weather.humidity, 10),
       reportTime: cleanText(weather.reporttime, 40),
+      source: "amap-regeo",
       text: formatWeatherText(weather, place),
     });
   } catch (error) {
     return json({ ok: false, message: "Weather request failed." }, 500);
   }
+}
+
+async function locateByIp(key) {
+  const ipUrl = new URL("https://restapi.amap.com/v3/ip");
+  ipUrl.searchParams.set("key", key);
+  ipUrl.searchParams.set("output", "JSON");
+
+  const response = await fetch(ipUrl.toString());
+  const data = await response.json();
+  if (data.status !== "1") return {};
+  return {
+    province: data.province || "",
+    city: data.city || "",
+    adcode: data.adcode || "",
+    citycode: "",
+  };
 }
 
 async function reverseGeocode(key, point) {
