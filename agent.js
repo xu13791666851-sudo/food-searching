@@ -660,14 +660,14 @@ async function loadNearbyRestaurants(options = {}) {
 }
 
 async function loadWeather(coords) {
-  if (!coords || !Number.isFinite(Number(coords.latitude)) || !Number.isFinite(Number(coords.longitude))) return;
-
   try {
-    const params = new URLSearchParams({
-      lat: String(coords.latitude),
-      lng: String(coords.longitude),
-    });
-    const response = await fetch(`/api/weather?${params.toString()}`);
+    const params = new URLSearchParams();
+    if (coords && Number.isFinite(Number(coords.latitude)) && Number.isFinite(Number(coords.longitude))) {
+      params.set("lat", String(coords.latitude));
+      params.set("lng", String(coords.longitude));
+    }
+    const query = params.toString();
+    const response = await fetch(`/api/weather${query ? `?${query}` : ""}`);
     const data = await response.json();
     if (!response.ok || !data.ok || !data.text) return;
     state.weatherText = data.text;
@@ -680,6 +680,7 @@ async function loadWeather(coords) {
 
 function initWeather() {
   updateWeatherStatus();
+  loadWeather();
   if (!navigator.geolocation || !navigator.permissions) return;
 
   navigator.permissions
