@@ -21,21 +21,22 @@ const state = {
   lastCoords: null,
   weatherText: "正在定位天气",
   weatherSource: "",
+  aiText: "正在检查 AI",
 };
 
 const OUT_CATEGORY_RULES = [
-  { impliesOut: true, pattern: /日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i },
-  { impliesOut: true, pattern: /韩餐|韩国料理|韩式|部队锅|石锅|拌饭|泡菜/i },
-  { impliesOut: true, pattern: /火锅|涮锅|锅底|串串/i },
-  { impliesOut: true, pattern: /烧烤|烤肉|烤串|烤鱼/i },
-  { impliesOut: true, pattern: /粤菜|茶餐厅|港式|烧腊|点心/i },
-  { impliesOut: true, pattern: /川菜|湘菜|麻辣|冒菜|酸菜鱼/i },
-  { impliesOut: false, pattern: /轻食|沙拉|健康餐|健身餐|低脂|低卡/i },
-  { impliesOut: false, pattern: /面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i },
-  { impliesOut: false, pattern: /米饭|盖饭|炒饭|饭类|便当|简餐/i },
-  { impliesOut: true, pattern: /炸鸡|鸡排|鸡翅|鸡腿(?!饭)|肯德基|kfc|KFC/i },
-  { impliesOut: true, pattern: /汉堡|披萨|pizza|Pizza|必胜客|达美乐/i },
-  { impliesOut: true, pattern: /麻辣烫|冒菜|串串|关东煮/i },
+  { label: "日料", impliesOut: true, pattern: /日料|日本料理|寿司|刺身|居酒屋|鳗鱼饭|豚骨|拉面/i },
+  { label: "韩餐", impliesOut: true, pattern: /韩餐|韩国料理|韩式|部队锅|石锅|拌饭|泡菜/i },
+  { label: "火锅", impliesOut: true, pattern: /火锅|涮锅|锅底|串串/i },
+  { label: "烧烤/烤肉", impliesOut: true, pattern: /烧烤|烤肉|烤串|烤鱼/i },
+  { label: "粤菜/港式", impliesOut: true, pattern: /粤菜|茶餐厅|港式|烧腊|点心/i },
+  { label: "川湘/麻辣", impliesOut: true, pattern: /川菜|湘菜|麻辣|冒菜|酸菜鱼/i },
+  { label: "轻食健康餐", impliesOut: false, pattern: /轻食|沙拉|健康餐|健身餐|低脂|低卡/i },
+  { label: "面食粉面", impliesOut: false, pattern: /面条|面食|拉面|拌面|粉|米线|馄饨|饺子/i },
+  { label: "米饭简餐", impliesOut: false, pattern: /米饭|盖饭|炒饭|饭类|便当|简餐/i },
+  { label: "炸鸡", impliesOut: true, pattern: /炸鸡|鸡排|鸡翅|鸡腿(?!饭)|肯德基|kfc|KFC/i },
+  { label: "汉堡披萨", impliesOut: true, pattern: /汉堡|披萨|pizza|Pizza|必胜客|达美乐/i },
+  { label: "麻辣烫冒菜", impliesOut: true, pattern: /麻辣烫|冒菜|串串|关东煮/i },
 ];
 
 const FOOD_TARGET_WORDS = [
@@ -241,14 +242,18 @@ function render() {
 function updateWeatherStatus() {
   const weatherStatus = $("#weatherStatus");
   if (weatherStatus) weatherStatus.textContent = state.weatherText || "天气暂不可用";
+  const agentModeStatus = $("#agentModeStatus");
+  if (agentModeStatus) agentModeStatus.textContent = state.aiText || "AI 状态未知";
 }
 
 function updateProgress() {
   const hasResult = state.resultMode && (state.candidates.length || state.resultMode === "empty");
-  $("#stepTitle").textContent = state.busy ? "正在处理" : hasResult ? "已给出推荐" : "Agent 对话";
-  $("#stepHint").textContent = hasResult ? "可以继续补充要求" : "选项只是快捷回复";
-  $("#assistantLine").textContent = hasResult ? "不满意就继续说，我会带着新要求再筛。" : "你说一句，我来判断是在家吃还是外面吃。";
-  $("#progressBar").style.width = state.busy ? "72%" : hasResult ? "100%" : "38%";
+  const assistantLine = $("#assistantLine");
+  if (assistantLine) {
+    assistantLine.textContent = hasResult
+      ? "不满意就继续说，我会带着新要求再筛。"
+      : "说说地点、预算、口味或现有食材，我会继续追问并给出建议。";
+  }
 }
 
 function chatMessage(message) {
@@ -405,6 +410,11 @@ async function sendMessage(message) {
       return;
     }
 
+    if (decision.action === "answer") {
+      addAssistant(decision.reply || "你可以再告诉我一点今天的饮食目标。", ["继续问", "外面吃", "在家吃", "重新开始"]);
+      return;
+    }
+
     if (decision.mode === "home" && !homeType) {
       addAssistant("你是想从做过的菜里挑，还是让我按今天状态推荐一道新菜？", [
         "从做过的菜里挑",
@@ -419,6 +429,7 @@ async function sendMessage(message) {
 
     startRecommendation(decision, homeType);
   } catch (error) {
+    console.error("Agent message failed", error);
     addAssistant("我刚才没理解成功。你可以换句话说，或者点下面的快捷回复。", ["外面吃", "在家吃", "想吃日料", "不想出门"]);
   }
 }
@@ -540,6 +551,13 @@ function addAssistant(text, quickReplies = []) {
   state.resultTitle = "";
   state.resultMessage = "";
   render();
+  scrollConversationIntoView("#agentInput");
+}
+
+function scrollConversationIntoView(selector) {
+  requestAnimationFrame(() => {
+    document.querySelector(selector)?.scrollIntoView({ block: "center", behavior: "auto" });
+  });
 }
 
 async function getAgentDecision(message) {
@@ -550,11 +568,37 @@ async function getAgentDecision(message) {
       body: JSON.stringify({ message }),
     });
     const data = await response.json();
-    if (response.ok && data && data.ok) return data;
+    if (response.ok && data && data.ok) {
+      if (data.ai) {
+        state.aiText = `AI 已接入 · ${data.aiProvider === "openai" ? "OpenAI" : "DeepSeek"}`;
+      } else if (data.aiStatus === "not_configured") {
+        state.aiText = "规则模式 · AI 未配置";
+      } else {
+        state.aiText = "规则模式 · AI 暂不可用";
+      }
+      updateWeatherStatus();
+      return data;
+    }
   } catch {
     // 本地直接打开 HTML 时使用轻量兜底。
   }
+  state.aiText = "规则模式 · 云端未连接";
+  updateWeatherStatus();
   return localAgentDecision(message);
+}
+
+async function initAgentStatus() {
+  try {
+    const response = await fetch("/api/agent", { headers: { Accept: "application/json" } });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error("status unavailable");
+    state.aiText = data.configured
+      ? `AI 已配置 · ${data.provider === "openai" ? "OpenAI" : "DeepSeek"}`
+      : "规则模式 · AI 未配置";
+  } catch {
+    state.aiText = "规则模式 · 云端未连接";
+  }
+  updateWeatherStatus();
 }
 
 function quickRepliesForDecision(decision) {
@@ -671,13 +715,13 @@ async function loadWeather(coords, options = {}) {
     const query = params.toString();
     const response = await fetch(`/api/weather${query ? `?${query}` : ""}`);
     const data = await response.json();
-    if (!response.ok || !data.ok || !data.text) return;
-    if (data.source === "amap-ip" && state.weatherSource === "amap-regeo") return;
-    state.weatherText = data.source === "amap-ip" ? `大致：${data.text}` : data.text;
+    if (!response.ok || !data.ok || !data.text) throw new Error("weather unavailable");
+    if (data.source !== "amap-regeo" && state.weatherSource === "amap-regeo") return;
+    state.weatherText = data.source === "cloudflare-location" ? `大致：${data.text}` : data.text;
     state.weatherSource = data.source || "";
     updateWeatherStatus();
   } catch {
-    state.weatherText = state.weatherText || "天气暂不可用";
+    state.weatherText = options.approximate ? "请允许定位以显示当地天气" : "天气暂不可用";
     updateWeatherStatus();
   }
 }
@@ -692,7 +736,7 @@ function initWeather() {
   navigator.geolocation.getCurrentPosition(
     (position) => loadWeather(position.coords),
     () => {
-      state.weatherText = "定位未授权，读取大致天气";
+      state.weatherText = "定位未授权，正在读取大致位置";
       updateWeatherStatus();
       loadWeather(null, { approximate: true });
     },
@@ -748,6 +792,7 @@ function showLocationHelp(message) {
   state.resultMessage = message;
   state.candidates = [];
   render();
+  scrollConversationIntoView(".location-panel");
 }
 
 function showEmptyResult(message) {
@@ -965,6 +1010,10 @@ function buildLocalSearchIntent(message) {
   };
 }
 
+function targetCategorySummary(message) {
+  return OUT_CATEGORY_RULES.find((rule) => rule.pattern.test(String(message || "")))?.label || "";
+}
+
 function targetProfileFor(target) {
   const value = String(target || "");
   return TARGET_PROFILES.find((profile) => profile.pattern.test(value)) || {
@@ -988,7 +1037,7 @@ function cleanFoodTarget(text) {
     .replace(/^(一个|一家|一些|一点|好吃的|附近的|能吃到的|没在列表里的|不在列表里的)+/g, "")
     .replace(/(餐厅|饭店|店|外卖|附近|人均|预算|可以吗|有没有|有吗)$/g, "")
     .trim();
-  if (!target || /外面吃|在家吃|今天|舒服点|随便|都可以|预算|距离/.test(target)) return "";
+  if (!target || /外面吃|在家吃|今天|舒服点|随便|都可以|预算|距离|清淡|高蛋白|低脂|健康|重口|热乎|少油|建议/.test(target)) return "";
   return target.slice(-8);
 }
 
@@ -1017,4 +1066,5 @@ function formatRadius(radius) {
 }
 
 render();
+initAgentStatus();
 initWeather();
