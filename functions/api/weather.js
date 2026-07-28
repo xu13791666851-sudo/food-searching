@@ -11,6 +11,7 @@ export async function onRequestGet(context) {
   const lng = Number(rawLng);
   const hasCoords = rawLat !== null && rawLng !== null && Number.isFinite(lat) && Number.isFinite(lng);
   const coord = cleanText(url.searchParams.get("coord"), 20);
+  const accuracy = Math.max(0, Number(url.searchParams.get("accuracy")) || 0);
 
   if (!context.env.AMAP_KEY) {
     return json({ ok: false, message: "AMAP_KEY is not configured." }, 500);
@@ -43,6 +44,7 @@ export async function onRequestGet(context) {
         humidity: cleanText(weather.humidity, 10),
         reportTime: cleanText(weather.reporttime, 40),
         source: "cloudflare-location",
+        location: formatLocation(place, point, 20000, "cloudflare"),
         text: formatWeatherText(weather, place),
       });
     }
@@ -70,6 +72,7 @@ export async function onRequestGet(context) {
       humidity: cleanText(weather.humidity, 10),
       reportTime: cleanText(weather.reporttime, 40),
       source: "amap-regeo",
+      location: formatLocation(place, point, accuracy, coord === "gcj02" ? "manual" : "browser"),
       text: formatWeatherText(weather, place),
     });
   } catch (error) {
@@ -88,19 +91,55 @@ async function reverseGeocode(key, point) {
   const regeoUrl = new URL("https://restapi.amap.com/v3/geocode/regeo");
   regeoUrl.searchParams.set("key", key);
   regeoUrl.searchParams.set("location", `${point.lng},${point.lat}`);
-  regeoUrl.searchParams.set("extensions", "base");
+  regeoUrl.searchParams.set("extensions", "all");
+  regeoUrl.searchParams.set("radius", "200");
+  regeoUrl.searchParams.set("roadlevel", "0");
   regeoUrl.searchParams.set("output", "JSON");
 
   const response = await fetch(regeoUrl.toString());
   const data = await response.json();
-  const component = data.regeocode?.addressComponent || {};
+  if (data.status !== "1" || !data.regeocode) {
+    throw new Error("Reverse geocode failed.");
+  }
+
+  const regeo = data.regeocode;
+  const component = regeo.addressComponent || {};
   const city = Array.isArray(component.city) ? "" : component.city;
+  const pois = Array.isArray(regeo.pois)
+    ? regeo.pois
+        .filter((item) => item && item.name)
+        .sort((a, b) => Number(a.distance || Infinity) - Number(b.distance || Infinity))
+    : [];
+  const aois = Array.isArray(regeo.aois)
+    ? regeo.aois
+        .filter((item) => item && item.name)
+        .sort((a, b) => Number(a.distance || Infinity) - Number(b.distance || Infinity))
+    : [];
+  const nearestPoi = pois[0];
+  const nearestAoi = aois[0];
+  const buildingName = objectName(component.building);
+  const neighborhoodName = objectName(component.neighborhood);
+  const street = cleanText(component.streetNumber?.street, 60);
+  const streetNumber = cleanText(component.streetNumber?.number, 30);
+  const exactName =
+    buildingName ||
+    (nearestAoi && Number(nearestAoi.distance || 0) <= 30 ? cleanText(nearestAoi.name, 100) : "") ||
+    (nearestPoi && Number(nearestPoi.distance || Infinity) <= 120 ? cleanText(nearestPoi.name, 100) : "") ||
+    neighborhoodName ||
+    [street, streetNumber].filter(Boolean).join("") ||
+    cleanText(component.township, 80) ||
+    cleanText(component.district, 60);
+
   return {
     province: component.province || "",
     city,
     district: component.district || "",
+    township: component.township || "",
     adcode: component.adcode || "",
     citycode: component.citycode || "",
+    exactName,
+    formattedAddress: cleanText(regeo.formatted_address, 180),
+    nearestPoiDistance: nearestPoi ? Number(nearestPoi.distance || 0) : 0,
   };
 }
 
@@ -122,6 +161,31 @@ function formatWeatherText(weather, place) {
   const condition = cleanText(weather.weather, 20) || "天气";
   const temperature = cleanText(weather.temperature, 10);
   return `${city} · ${condition}${temperature ? ` · ${temperature}°C` : ""}`;
+}
+
+function formatLocation(place, point, accuracyMeters, source) {
+  const city = cleanText(place.city || place.province, 40);
+  const district = cleanText(place.district, 40);
+  const exactName = cleanText(place.exactName, 100);
+  const name = exactName || [city, district].filter(Boolean).join(" · ") || "当前位置";
+
+  return {
+    name,
+    address: cleanText(place.formattedAddress, 180),
+    city,
+    district,
+    township: cleanText(place.township, 60),
+    adcode: cleanText(place.adcode, 20),
+    lat: Number(point.lat.toFixed(6)),
+    lng: Number(point.lng.toFixed(6)),
+    accuracyMeters: Number.isFinite(accuracyMeters) ? Math.round(accuracyMeters) : 0,
+    source,
+  };
+}
+
+function objectName(value) {
+  if (!value || Array.isArray(value) || typeof value !== "object") return "";
+  return cleanText(value.name, 100);
 }
 
 function cleanText(value, maxLength) {
