@@ -4,39 +4,31 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>今天吃什么</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=5" />
   </head>
   <body class="mobile-app-page">
     <main class="app-shell agent-shell">
       <header class="hero agent-hero">
-        <div class="brand-row">
-          <span class="brand-mark">食</span>
-          <div>
-            <strong>今天吃什么</strong>
-            <small>Agent 对话版</small>
+        <div class="agent-topbar">
+          <div class="brand-row">
+            <span class="brand-mark">食</span>
+            <div>
+              <strong>今天吃什么</strong>
+              <small>AI 饮食助手</small>
+            </div>
           </div>
+          <a class="agent-nav-link" href="classic.html">经典流程</a>
         </div>
         <div class="agent-hero-status">
-          <span>上海 · 小雨 · 24°C</span>
-          <span>对话推进</span>
+          <span id="weatherStatus">正在获取当地天气</span>
+          <span id="agentModeStatus">正在检查 AI</span>
         </div>
         <h1 class="hero-title">
-          <span>先聊天</span>
-          <span>再帮你定</span>
+          <span>想吃什么，</span>
+          <span>直接告诉我</span>
         </h1>
-        <p id="assistantLine">你说一句，我来判断是在家吃还是外面吃。</p>
-        <a class="agent-nav-link" href="classic.html">使用经典流程</a>
+        <p id="assistantLine">说说地点、预算、口味或现有食材，我会继续追问并给出建议。</p>
       </header>
-
-      <section class="progress-wrap" aria-label="Agent 进度">
-        <div class="progress-meta">
-          <strong id="stepTitle">Agent 对话</strong>
-          <span id="stepHint">选项只是快捷回复</span>
-        </div>
-        <div class="progress-track">
-          <span id="progressBar"></span>
-        </div>
-      </section>
 
       <section class="workspace agent-workspace" id="workspace" aria-live="polite"></section>
     </main>
@@ -48,6 +40,6 @@
       <a href="me.html"><span>♡</span><strong>我的</strong></a>
     </nav>
 
-    <script src="agent.js"></script>
+    <script src="agent.js?v=7"></script>
   </body>
 </html>
