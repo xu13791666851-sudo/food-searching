@@ -99,6 +99,15 @@ const TARGET_PROFILES = [
   },
 ];
 
+export async function onRequestGet(context) {
+  const provider = context.env?.DEEPSEEK_API_KEY ? "deepseek" : context.env?.OPENAI_API_KEY ? "openai" : "";
+  return json({
+    ok: true,
+    configured: Boolean(provider),
+    provider,
+  });
+}
+
 export async function onRequestPost(context) {
   try {
     const body = await context.request.json();
@@ -112,9 +121,15 @@ export async function onRequestPost(context) {
       });
     }
 
-    const aiDecision = await understandWithAi(context.env, message);
-    const decision = aiDecision || decide(message);
-    return json({ ok: true, ...decision });
+    const aiResult = await understandWithAi(context.env, message);
+    const decision = aiResult.decision || decide(message);
+    return json({
+      ok: true,
+      ...decision,
+      ai: Boolean(aiResult.decision),
+      aiStatus: aiResult.status,
+      aiProvider: aiResult.provider,
+    });
   } catch (error) {
     return json({ ok: false, message: "Agent could not understand this request." }, 400);
   }
@@ -169,17 +184,19 @@ function decide(message) {
 }
 
 async function understandWithAi(env, message) {
-  if (!env?.DEEPSEEK_API_KEY && !env?.OPENAI_API_KEY) return null;
+  const provider = env?.DEEPSEEK_API_KEY ? "deepseek" : env?.OPENAI_API_KEY ? "openai" : "";
+  if (!provider) return { decision: null, status: "not_configured", provider: "" };
 
   try {
     const aiResponse = env.DEEPSEEK_API_KEY
       ? await callDeepSeek(env, message)
       : await callOpenAI(env, message);
-    if (!aiResponse.ok) return null;
+    if (!aiResponse.ok) return { decision: null, status: aiResponse.status || "request_failed", provider };
     const parsed = parseJsonObject(aiResponse.text);
-    return normalizeAiDecision(parsed, message);
+    if (!parsed) return { decision: null, status: "invalid_response", provider };
+    return { decision: normalizeAiDecision(parsed, message), status: "ready", provider };
   } catch {
-    return null;
+    return { decision: null, status: "request_failed", provider };
   }
 }
 
@@ -193,10 +210,11 @@ async function callDeepSeek(env, message) {
     body: JSON.stringify({
       model: env.DEEPSEEK_MODEL || "deepseek-v4-flash",
       messages: buildUnderstandingMessages(message),
+      response_format: { type: "json_object" },
       stream: false,
     }),
   });
-  if (!response.ok) return { ok: false, text: "" };
+  if (!response.ok) return { ok: false, status: classifyAiError(response.status), text: "" };
   const data = await response.json();
   return { ok: true, text: data.choices?.[0]?.message?.content || "" };
 }
@@ -213,7 +231,7 @@ async function callOpenAI(env, message) {
       input: buildUnderstandingMessages(message),
     }),
   });
-  if (!response.ok) return { ok: false, text: "" };
+  if (!response.ok) return { ok: false, status: classifyAiError(response.status), text: "" };
   const data = await response.json();
   return { ok: true, text: extractResponseText(data) };
 }
@@ -223,14 +241,14 @@ function buildUnderstandingMessages(message) {
     {
       role: "system",
       content:
-        "你是吃饭决策 Agent 的意图理解层。你只负责把用户中文口语整理成结构化信息，不要编造餐厅。重要：区分具体菜品和餐类。比如“鸡腿饭”是菜品/饭类，可能在沙县、盖饭、快餐、便当店出现，不是炸鸡；“日料”是餐类；“牛肉粉”是菜品，可能在粉面/小吃店出现。只返回 JSON。",
+        "你是吃饭决策助手。用户要开始找餐厅或菜谱时，把口语整理成结构化信息，不要编造餐厅；用户只是咨询饮食选择、菜品差异或怎么吃时，用 action=answer 并在 reply 里直接简短回答。区分具体菜品和餐类，例如“鸡腿饭”是菜品/饭类，不是炸鸡；“日料”是餐类；“牛肉粉”是菜品。只返回 JSON。",
     },
     {
       role: "user",
       content: JSON.stringify({
         user_message: message,
         output_schema: {
-          action: "recommend 或 ask",
+          action: "recommend、ask 或 answer",
           mode: "out/home/unknown",
           missing: ["缺什么信息"],
           preferences: {
@@ -257,6 +275,13 @@ function buildUnderstandingMessages(message) {
 }
 
 function normalizeAiDecision(parsed, message) {
+  if (parsed.action === "answer" && cleanText(parsed.reply, 500)) {
+    return {
+      action: "answer",
+      reply: cleanText(parsed.reply, 500),
+    };
+  }
+
   const mode = parsed.mode === "home" ? "home" : parsed.mode === "out" ? "out" : inferMode(message);
   if (!mode) {
     return {
@@ -282,6 +307,13 @@ function normalizeAiDecision(parsed, message) {
         ? `我先理解成你想找${target ? `“${target}”` : "外面吃"}，会按预算、距离和可能店型去找真实餐厅。`
         : buildReply(message, mode, preferences)),
   };
+}
+
+function classifyAiError(status) {
+  if (status === 401 || status === 403) return "auth_error";
+  if (status === 429) return "rate_limited";
+  if (status >= 500) return "provider_error";
+  return "request_failed";
 }
 
 function normalizeSearchIntent(value, fallback) {
@@ -472,7 +504,7 @@ function cleanFoodTarget(text) {
     .replace(/^(一个|一家|一些|一点|好吃的|附近的|能吃到的|没在列表里的|不在列表里的)+/g, "")
     .replace(/(餐厅|饭店|店|外卖|附近|人均|预算|可以吗|有没有|有吗)$/g, "")
     .trim();
-  if (!target || /外面吃|在家吃|今天|舒服点|随便|都可以|预算|距离/.test(target)) return "";
+  if (!target || /外面吃|在家吃|今天|舒服点|随便|都可以|预算|距离|清淡|高蛋白|低脂|健康|重口|热乎|少油|建议/.test(target)) return "";
   return target.slice(-8);
 }
 
