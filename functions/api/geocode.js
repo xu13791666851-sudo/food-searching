@@ -7,9 +7,17 @@ export async function onRequestGet(context) {
   const url = new URL(context.request.url);
   const keyword = cleanText(url.searchParams.get("keyword"), 80);
   const city = cleanText(url.searchParams.get("city"), 40) || "全国";
-  const lat = Number(url.searchParams.get("lat"));
-  const lng = Number(url.searchParams.get("lng"));
-  const hasBiasPoint = Number.isFinite(lat) && Number.isFinite(lng);
+  const latValue = url.searchParams.get("lat");
+  const lngValue = url.searchParams.get("lng");
+  const lat = Number(latValue);
+  const lng = Number(lngValue);
+  const hasBiasPoint =
+    latValue !== null &&
+    lngValue !== null &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180;
 
   if (!context.env.AMAP_KEY) {
     return json({ ok: false, message: "AMAP_KEY is not configured." }, 500);
