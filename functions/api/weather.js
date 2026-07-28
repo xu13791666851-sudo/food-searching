@@ -34,7 +34,7 @@ export async function onRequestGet(context) {
       }
       return json({
         ok: true,
-        city: cleanText(weather.city || place.city || place.province || "当前位置", 40),
+        city: cleanText(place.city || weather.city || place.province || "当前位置", 40),
         district: cleanText(place.district, 40),
         weather: cleanText(weather.weather, 40),
         temperature: cleanText(weather.temperature, 10),
@@ -61,7 +61,7 @@ export async function onRequestGet(context) {
 
     return json({
       ok: true,
-      city: cleanText(weather.city || place.city || place.province || "当前位置", 40),
+      city: cleanText(place.city || weather.city || place.province || "当前位置", 40),
       district: cleanText(place.district, 40),
       weather: cleanText(weather.weather, 40),
       temperature: cleanText(weather.temperature, 10),
@@ -118,7 +118,7 @@ async function fetchAmapWeather(key, cityCode) {
 }
 
 function formatWeatherText(weather, place) {
-  const city = cleanText(weather.city || place.city || place.province || "当前位置", 40);
+  const city = cleanText(place.city || weather.city || place.province || "当前位置", 40);
   const condition = cleanText(weather.weather, 20) || "天气";
   const temperature = cleanText(weather.temperature, 10);
   return `${city} · ${condition}${temperature ? ` · ${temperature}°C` : ""}`;
