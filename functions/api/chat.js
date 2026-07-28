@@ -295,12 +295,24 @@ async function findVerifiedNearbyPlaces(env, message, context) {
 
   const keyword = extractNearbyKeyword(message);
   const radius = resolveSearchRadius(message, safeContext.distanceLimit);
-  const places = await searchAmapAround(
-    env.AMAP_KEY,
-    center,
-    keyword,
-    radius,
+  const city = cleanText(
+    safeContext.locationPoint?.city ||
+      safeContext.locationPoint?.adcode ||
+      "",
+    40,
   );
+  const [aroundPlaces, anchoredTextPlaces] = await Promise.all([
+    searchAmapAround(env.AMAP_KEY, center, keyword, radius).catch(() => []),
+    searchAmapTextNearAnchor(
+      env.AMAP_KEY,
+      anchorName,
+      keyword,
+      city,
+      center,
+      radius,
+    ).catch(() => []),
+  ]);
+  const places = mergeNearbyPlaces(aroundPlaces, anchoredTextPlaces);
 
   return {
     anchorName,
@@ -519,6 +531,95 @@ async function searchAmapAround(key, center, keyword, radius) {
     })
     .filter(Boolean)
     .sort((a, b) => a.distanceMeters - b.distanceMeters);
+}
+
+async function searchAmapTextNearAnchor(
+  key,
+  anchorName,
+  keyword,
+  city,
+  center,
+  radius,
+) {
+  const searchUrl = new URL("https://restapi.amap.com/v3/place/text");
+  searchUrl.searchParams.set("key", key);
+  searchUrl.searchParams.set(
+    "keywords",
+    `${anchorName} ${keyword || "餐厅"}`.trim(),
+  );
+  if (city) {
+    searchUrl.searchParams.set("city", city);
+    searchUrl.searchParams.set("citylimit", "true");
+  }
+  searchUrl.searchParams.set("offset", "20");
+  searchUrl.searchParams.set("page", "1");
+  searchUrl.searchParams.set("extensions", "all");
+  searchUrl.searchParams.set("output", "JSON");
+
+  const response = await fetch(searchUrl.toString());
+  const data = await response.json();
+  if (data.status !== "1" || !Array.isArray(data.pois)) return [];
+
+  return data.pois
+    .map((poi) => {
+      const [lng, lat] = String(poi.location || "").split(",").map(Number);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      const type = cleanText(poi.type, 120);
+      if (!/餐饮服务/.test(type)) return null;
+
+      const bizExt =
+        poi.biz_ext && typeof poi.biz_ext === "object" ? poi.biz_ext : {};
+      const distanceMeters = Math.round(
+        haversineDistance(center.lat, center.lng, lat, lng),
+      );
+      if (distanceMeters > radius) return null;
+      const region = [
+        amapText(poi.pname),
+        amapText(poi.cityname),
+        amapText(poi.adname),
+      ]
+        .filter(Boolean)
+        .join("");
+
+      return {
+        id: cleanText(poi.id, 80),
+        name: cleanText(poi.name, 120),
+        address: cleanText(
+          [region, amapText(poi.address)].filter(Boolean).join(" "),
+          180,
+        ),
+        type,
+        lat,
+        lng,
+        distanceMeters,
+        rating: cleanOptionalNumber(amapText(bizExt.rating), 0, 5),
+        cost: cleanOptionalNumber(amapText(bizExt.cost), 1, 999),
+        phone: cleanText(amapText(poi.tel), 40),
+        tags: cleanText(amapText(poi.tag), 200)
+          .split(/[,，]/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .slice(0, 6),
+      };
+    })
+    .filter((place) => place?.name)
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+}
+
+function mergeNearbyPlaces(...groups) {
+  const placesById = new Map();
+  for (const place of groups.flat()) {
+    const key =
+      place.id ||
+      `${place.name}-${place.lng.toFixed(6)}-${place.lat.toFixed(6)}`;
+    const existing = placesById.get(key);
+    if (!existing || place.distanceMeters < existing.distanceMeters) {
+      placesById.set(key, place);
+    }
+  }
+  return [...placesById.values()].sort(
+    (a, b) => a.distanceMeters - b.distanceMeters,
+  );
 }
 
 function applyVerifiedNearbyPlaces(response, nearbySearch, context) {
