@@ -18,8 +18,13 @@ export async function onRequestGet(context) {
 
   try {
     if (!hasCoords) {
-      const ipPlace = await locateByIp(context.env.AMAP_KEY);
-      const cityCode = ipPlace.adcode || ipPlace.citycode;
+      const edgePoint = requestLocation(context.request);
+      if (!edgePoint) {
+        return json({ ok: false, message: "Approximate user location is unavailable." }, 404);
+      }
+      const point = wgs84ToGcj02(edgePoint.lat, edgePoint.lng);
+      const place = await reverseGeocode(context.env.AMAP_KEY, point);
+      const cityCode = place.adcode || place.citycode;
       if (!cityCode) {
         return json({ ok: false, message: "Weather city could not be detected." }, 404);
       }
@@ -29,16 +34,16 @@ export async function onRequestGet(context) {
       }
       return json({
         ok: true,
-        city: cleanText(weather.city || ipPlace.city || ipPlace.province || "当前位置", 40),
-        district: "",
+        city: cleanText(weather.city || place.city || place.province || "当前位置", 40),
+        district: cleanText(place.district, 40),
         weather: cleanText(weather.weather, 40),
         temperature: cleanText(weather.temperature, 10),
         windDirection: cleanText(weather.winddirection, 20),
         windPower: cleanText(weather.windpower, 20),
         humidity: cleanText(weather.humidity, 10),
         reportTime: cleanText(weather.reporttime, 40),
-        source: "amap-ip",
-        text: formatWeatherText(weather, ipPlace),
+        source: "cloudflare-location",
+        text: formatWeatherText(weather, place),
       });
     }
 
@@ -72,20 +77,11 @@ export async function onRequestGet(context) {
   }
 }
 
-async function locateByIp(key) {
-  const ipUrl = new URL("https://restapi.amap.com/v3/ip");
-  ipUrl.searchParams.set("key", key);
-  ipUrl.searchParams.set("output", "JSON");
-
-  const response = await fetch(ipUrl.toString());
-  const data = await response.json();
-  if (data.status !== "1") return {};
-  return {
-    province: data.province || "",
-    city: data.city || "",
-    adcode: data.adcode || "",
-    citycode: "",
-  };
+function requestLocation(request) {
+  const lat = Number(request.cf?.latitude);
+  const lng = Number(request.cf?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
 }
 
 async function reverseGeocode(key, point) {
