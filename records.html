@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow,noarchive" />
+    <title>使用记录 · 今天吃什么</title>
+    <link rel="stylesheet" href="/records.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div>
+          <p class="eyebrow">今天吃什么 · 内部数据</p>
+          <h1>反馈与使用记录</h1>
+          <p class="subtitle">这里只记录匿名使用结果，不记录完整提问和精确位置。</p>
+        </div>
+        <button id="refreshButton" type="button" disabled>刷新数据</button>
+      </header>
+
+      <section id="loginPanel" class="panel login-panel">
+        <label for="tokenInput">后台查看密钥</label>
+        <div class="token-row">
+          <input id="tokenInput" type="password" autocomplete="current-password" placeholder="输入后台密钥" />
+          <button id="loadButton" type="button">查看记录</button>
+        </div>
+        <p id="statusText">密钥只保存在当前浏览器，不会发送给其他服务。</p>
+      </section>
+
+      <section id="dashboard" class="dashboard hidden">
+        <div class="metrics">
+          <article><span>使用次数</span><strong id="sessionCount">0</strong></article>
+          <article><span>AI 请求</span><strong id="aiCount">0</strong></article>
+          <article><span>AI 成功率</span><strong id="aiSuccessRate">-</strong></article>
+          <article><span>结果被采纳</span><strong id="acceptedCount">0</strong></article>
+          <article><span>正向反馈</span><strong id="positiveCount">0</strong></article>
+          <article><span>负向反馈</span><strong id="negativeCount">0</strong></article>
+        </div>
+
+        <div class="grid">
+          <section class="panel">
+            <h2>常用页面</h2>
+            <div id="pageBars" class="bars"></div>
+          </section>
+          <section class="panel">
+            <h2>反馈来源</h2>
+            <div id="feedbackBars" class="bars"></div>
+          </section>
+          <section class="panel">
+            <h2>选择结果</h2>
+            <div id="choiceBars" class="bars"></div>
+          </section>
+          <section class="panel">
+            <h2>设备分布</h2>
+            <div id="deviceBars" class="bars"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="section-title">
+            <h2>最近记录</h2>
+            <button id="exportButton" type="button">导出表格</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>时间</th><th>类型</th><th>页面</th><th>结果</th></tr>
+              </thead>
+              <tbody id="recordsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="/records.js"></script>
+  </body>
+</html>
