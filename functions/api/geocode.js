@@ -80,11 +80,8 @@ async function searchPlaces(key, keyword, city, biasPoint) {
   searchUrl.searchParams.set("key", key);
   searchUrl.searchParams.set("keywords", keyword);
   if (city && city !== "全国") {
-    searchUrl.searchParams.set("city", city);
-    searchUrl.searchParams.set(
-      "citylimit",
-      isDistrictAdcode(city) ? "false" : "true",
-    );
+    searchUrl.searchParams.set("city", toCitySearchScope(city));
+    searchUrl.searchParams.set("citylimit", "true");
   }
   searchUrl.searchParams.set("offset", "12");
   searchUrl.searchParams.set("page", "1");
@@ -128,6 +125,10 @@ async function searchPlaces(key, keyword, city, biasPoint) {
 
 function isDistrictAdcode(value) {
   return /^\d{6}$/.test(value) && !value.endsWith("00");
+}
+
+function toCitySearchScope(value) {
+  return isDistrictAdcode(value) ? `${value.slice(0, 4)}00` : value;
 }
 
 function amapText(value) {
