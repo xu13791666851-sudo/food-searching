@@ -1,0 +1,6 @@
+{
+  "name": "今天吃什么",
+  "description": "面向日常饮食决策的 AI 助手，包含外面吃、在家吃推荐、自然对话调优、天气与地理因素及个人偏好管理。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

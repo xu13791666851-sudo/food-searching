@@ -102,14 +102,14 @@ export async function onRequestPost(context) {
   }
 }
 
-function getProvider(env) {
+export function getProvider(env) {
   if (env?.GEMINI_API_KEY) return "gemini";
   if (env?.DEEPSEEK_API_KEY) return "deepseek";
   if (env?.OPENAI_API_KEY) return "openai";
   return "";
 }
 
-async function callProvider(provider, env, prompt) {
+export async function callProvider(provider, env, prompt) {
   if (provider === "gemini") return callGemini(env, prompt);
   if (provider === "deepseek") return callDeepSeek(env, prompt);
   return callOpenAI(env, prompt);
@@ -725,7 +725,7 @@ function haversineDistance(lat1, lng1, lat2, lng2) {
   return 2 * radius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function normalizeRecipe(item, index) {
+export function normalizeRecipe(item, index) {
   const difficulty = ["新手简单", "中等难度", "厨神进阶"].includes(item?.difficulty)
     ? item.difficulty
     : "新手简单";
@@ -789,7 +789,7 @@ function buildFallback(message, context, providerFailed = false) {
   };
 }
 
-function parseJsonObject(text) {
+export function parseJsonObject(text) {
   const value = String(text || "").replace(/^```(?:json)?\s*|\s*```$/g, "").trim();
   try {
     return JSON.parse(value);

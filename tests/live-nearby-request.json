@@ -1,0 +1,18 @@
+{
+  "message": "帮我找雪松大厦附近的咖啡店，优先最近的",
+  "context": {
+    "locationName": "腾讯滨海大厦北塔",
+    "locationPoint": {
+      "lat": 22.531379,
+      "lng": 114.021641,
+      "city": "深圳市",
+      "district": "福田区",
+      "adcode": "440304"
+    },
+    "weatherCondition": "阴 26°C",
+    "budgetLimit": "不限",
+    "distanceLimit": "3公里",
+    "dietaryRestrictions": "无",
+    "pantryIngredients": []
+  }
+}
