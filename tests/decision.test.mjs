@@ -52,7 +52,8 @@ test('decision endpoint selects a real Amap restaurant for eating out', async ()
     assert.equal(result.item.id, 'amap-real-store');
     assert.equal(result.item.distanceMeters, 18);
     assert.equal(result.item.pricePerPerson, 28);
-    assert.match(result.reason, /高德地图的真实门店/);
+    assert.match(result.reason, /来自高德地图/);
+    assert.match(result.reason, /在所选预算范围内/);
     assert.equal(upstreamUrl.searchParams.get('keywords'), '川菜');
     assert.equal(upstreamUrl.searchParams.get('radius'), '1000');
   } finally {
@@ -120,28 +121,89 @@ test('decision endpoint generates a real-time AI recipe for cooking at home', as
     assert.equal(result.item.name, '番茄鸡蛋快手面');
     assert.equal(result.item.cookingTimeMinutes, 12);
     assert.equal(result.item.image, '');
-    assert.match(result.reason, /15 分钟内/);
+    assert.match(result.reason, /预计烹饪 12 分钟/);
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
 test('decision endpoint requires a real location for eating out', async () => {
-  const response = await onRequestPost({
-    request: new Request('https://example.test/api/decision', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scene: 'eat_out',
-        flavor: 'savory',
-        budget: 'standard',
+  for (const location of [undefined, { lat: null, lng: null }, { lat: '', lng: ' ' }]) {
+    const response = await onRequestPost({
+      request: new Request('https://example.test/api/decision', {
+        method: 'POST',
+        body: JSON.stringify({ scene: 'eat_out', location }),
       }),
-    }),
-    env: {},
-  });
-  const result = await response.json();
+      env: {},
+    });
+    const result = await response.json();
 
-  assert.equal(response.status, 400);
-  assert.equal(result.ok, false);
-  assert.equal('item' in result, false);
+    assert.equal(response.status, 400);
+    assert.equal(result.ok, false);
+    assert.equal('item' in result, false);
+  }
+});
+
+test('restaurant decisions respect each budget and exhaust related searches without repeating stores', async (t) => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const stores = [['unknown', ''], ['low', '30'], ['mid', '60'], ['high', '61']];
+  const relatedStores = [['low', '30'], ['related-low', '24']];
+  globalThis.fetch = async (input) => {
+    const keyword = new URL(String(input)).searchParams.get('keywords');
+    calls.push(keyword);
+    const offers = keyword === '川菜' ? stores : keyword === '湘菜' ? relatedStores : [];
+    return Response.json({
+      status: '1',
+      pois: offers.map(([id, cost], index) => ({
+        id, name: `${keyword}馆 ${id}`, type: `餐饮服务;中餐厅;${keyword}`,
+        location: `113.9305${index},22.533191`, distance: String(index + 10),
+        address: '测试路', biz_ext: { cost },
+      })),
+    });
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
+  async function decide(budget, exclusions = {}) {
+    const response = await onRequestPost({
+      request: new Request('https://example.test/api/decision', {
+        method: 'POST',
+        body: JSON.stringify({
+          scene: 'eat_out', flavor: 'spicy', budget, ...exclusions,
+          location: { lat: 22.533191, lng: 113.93041 },
+        }),
+      }),
+      env: { AMAP_KEY: 'test-key' },
+    });
+    return { status: response.status, ...(await response.json()) };
+  }
+
+  for (const [budget, id] of [['quick', 'low'], ['standard', 'mid'], ['premium', 'high']]) {
+    calls.length = 0;
+    const chosen = await decide(budget);
+    assert.equal(chosen.status, 200);
+    assert.equal(chosen.item.id, id);
+    assert.deepEqual(calls, ['川菜']);
+
+    if (budget === 'quick') {
+      const related = await decide(budget, { excludeTargetId: id });
+      assert.equal(related.status, 200);
+      assert.equal(related.item.id, 'related-low');
+      assert.match(related.reason, /按“湘菜”查询/);
+    }
+
+    const retry = await decide(budget, { excludeTargetIds: [id, 'related-low'] });
+    assert.equal(retry.status, 422);
+    assert.equal(retry.code, 'NO_MATCH');
+    assert.match(retry.message, /都推荐过了/);
+    assert.equal('item' in retry, false);
+  }
+  stores.splice(1, 1);
+  relatedStores.length = 0;
+  calls.length = 0;
+  const absent = await decide('quick');
+  assert.equal(absent.status, 422);
+  assert.match(absent.message, /没找到有参考人均价且符合预算/);
+  assert.equal('item' in absent, false);
+  assert.deepEqual(calls, ['川菜', '湘菜']);
 });

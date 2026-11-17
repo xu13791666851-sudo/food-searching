@@ -15,7 +15,7 @@ test('nearby endpoint returns Amap restaurants ordered by live distance', async 
           name: '远处咖啡店',
           type: '餐饮服务;咖啡厅;咖啡厅',
           location: '113.932000,22.533191',
-          distance: '162',
+          distance: [],
           address: '科苑路一层',
           pname: '广东省',
           cityname: '深圳市',
@@ -53,6 +53,8 @@ test('nearby endpoint returns Amap restaurants ordered by live distance', async 
     assert.equal(result.source, 'amap');
     assert.equal(result.restaurants[0].id, 'near-store');
     assert.equal(result.restaurants[0].distanceMeters, 10);
+    assert.equal(result.restaurants[1].id, 'far-store');
+    assert.ok(result.restaurants[1].distanceMeters > 100);
     assert.equal(result.restaurants[0].pricePerPerson, 24);
     assert.equal(result.restaurants[0].cuisine, '咖啡轻食');
     assert.equal(result.restaurants[0].location.lat, 22.533191);

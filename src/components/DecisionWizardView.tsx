@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import {
-  ArrowRight,
   CheckCircle,
   Compass,
-  Dices,
   RefreshCw,
   Sparkles,
   Trophy,
@@ -30,17 +28,22 @@ interface DecisionResult {
   source: 'amap' | 'ai';
 }
 
+interface DecisionIssue {
+  message: string;
+  kind: 'no_match' | 'setup' | 'retry';
+}
+
 const FLAVORS: { label: string; val: FlavorChoice }[] = [
-  { label: '🌶️ 香辣爽口（川湘 / 韩式 / 重辣）', val: 'spicy' },
-  { label: '🍲 清淡暖胃（汤面 / 砂锅 / 粤菜）', val: 'light' },
+  { label: '🌶️ 香辣爽口（川菜 / 湘菜）', val: 'spicy' },
+  { label: '🍲 清淡暖胃（粤菜 / 汤面）', val: 'light' },
   { label: '🥗 减脂轻食（低卡沙拉 / 高蛋白）', val: 'healthy' },
-  { label: '🍛 浓郁下饭（煲仔饭 / 咖喱 / 炒菜）', val: 'savory' },
+  { label: '🍛 浓郁下饭（煲仔饭 / 炒菜）', val: 'savory' },
 ];
 
-const BUDGETS: { label: string; val: BudgetChoice }[] = [
-  { label: '⚡ 快捷实惠（外食人均 ¥30 内 / 做饭 15 分钟内）', val: 'quick' },
-  { label: '🍱 标准舒适（外食人均 ¥30–60 / 做饭 30 分钟内）', val: 'standard' },
-  { label: '✨ 精致享受（外食人均 ¥60+ / 做饭 60 分钟内）', val: 'premium' },
+const BUDGETS: { label: string; val: BudgetChoice; price: string; minutes: number }[] = [
+  { label: '⚡ 快捷实惠', val: 'quick', price: '人均 30 元及以下', minutes: 15 },
+  { label: '🍱 标准舒适', val: 'standard', price: '人均超过 30 元，最高 60 元', minutes: 30 },
+  { label: '✨ 精致享受', val: 'premium', price: '人均超过 60 元', minutes: 60 },
 ];
 
 export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
@@ -52,32 +55,27 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
   const [step, setStep] = useState(1);
   const [sceneChoice, setSceneChoice] = useState<SceneChoice>('eat_out');
   const [flavorChoice, setFlavorChoice] = useState<FlavorChoice>('savory');
-  const [budgetChoice, setBudgetChoice] = useState<BudgetChoice>('quick');
+  const [budgetChoice, setBudgetChoice] = useState<BudgetChoice | null>(null);
   const [isSpinning, setIsSpinning] = useState(false);
-  const [loadError, setLoadError] = useState('');
+  const [issue, setIssue] = useState<DecisionIssue | null>(null);
   const [result, setResult] = useState<DecisionResult | null>(null);
+  const [shownIds, setShownIds] = useState<string[]>([]);
 
-  const handleStartSpin = async (
-    isRetry = false,
-    selectedBudget: BudgetChoice = budgetChoice,
-  ) => {
+  const resetDecision = () => {
+    setBudgetChoice(null);
+    setIssue(null);
+    setResult(null);
+    setShownIds([]);
+  };
+
+  const requestDecision = async (selectedBudget: BudgetChoice, replace = false) => {
     if (isSpinning) return;
 
-    if (isRetry && result) {
-      trackEvent(
-        'decision_retried',
-        { targetType: result.type, targetId: result.item.id, targetName: result.item.name },
-        'decision_wizard',
-      );
-      recordFeedback({
-        source: 'decision',
-        sentiment: 'negative',
-        targetType: result.type,
-        targetId: result.item.id,
-        targetName: result.item.name,
-        reason: 'decision_retried',
-      });
-    } else {
+    const excludedIds = replace ? shownIds : [];
+    if (!replace) {
+      setBudgetChoice(selectedBudget);
+      setResult(null);
+      setShownIds([]);
       trackEvent(
         'decision_started',
         { scene: sceneChoice, flavor: flavorChoice, budget: selectedBudget },
@@ -86,8 +84,7 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
     }
 
     setIsSpinning(true);
-    setLoadError('');
-    setResult(null);
+    setIssue(null);
 
     try {
       const response = await fetch('/api/decision', {
@@ -103,12 +100,16 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
           maxDistanceMeters: Math.round((preferences.maxDistanceKm || 2) * 1000),
           ingredients: preferences.pantryIngredients,
           dislikes: preferences.dislikes,
-          excludeTargetId: isRetry && result ? result.item.id : '',
+          excludeTargetIds: excludedIds.slice(-50),
         }),
       });
       const data = await response.json();
       if (!response.ok || !data?.ok || !data?.item || !data?.type) {
-        throw new Error(data?.message || '真实决策暂时生成失败');
+        setIssue({
+          message: data?.message || '暂时无法生成推荐，请稍后重试。',
+          kind: data?.code === 'NO_MATCH' ? 'no_match' : response.status === 400 ? 'setup' : 'retry',
+        });
+        return;
       }
 
       const generatedResult: DecisionResult = {
@@ -118,6 +119,7 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
         source: data.source,
       };
       setResult(generatedResult);
+      setShownIds([...excludedIds.slice(-49), generatedResult.item.id]);
       trackEvent(
         'decision_generated',
         {
@@ -128,26 +130,37 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
         },
         'decision_wizard',
       );
-    } catch (error) {
-      setLoadError(
-        error instanceof Error
-          ? error.message
-          : '真实决策暂时生成失败，请稍后再试。',
-      );
+    } catch {
+      setIssue({ kind: 'retry', message: '暂时无法生成推荐，请稍后重试。' });
     } finally {
       setIsSpinning(false);
     }
   };
 
+  const requestReplacement = () => {
+    if (!result || !budgetChoice || isSpinning) return;
+
+    trackEvent(
+      'decision_retried',
+      { targetType: result.type, targetId: result.item.id, targetName: result.item.name },
+      'decision_wizard',
+    );
+    recordFeedback({
+      source: 'decision',
+      sentiment: 'negative',
+      targetType: result.type,
+      targetId: result.item.id,
+      targetName: result.item.name,
+      reason: 'decision_retried',
+    });
+    void requestDecision(budgetChoice, true);
+  };
+
   return (
     <div className="max-w-3xl mx-auto px-2 sm:px-4 py-6 space-y-6">
       <div className="text-center space-y-2">
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100 text-orange-800 text-xs font-bold border border-orange-200">
-          <Dices className="w-4 h-4 text-orange-500 animate-spin" />
-          治愈选择困难症 · 3 步极速做决定
-        </div>
         <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-          不知道吃什么？跟着感觉点 3 下
+          今天吃什么？我帮你选
         </h2>
         <p className="text-xs text-slate-500">
           外食结果来自高德真实门店，在家吃由 AI 根据现有食材实时生成。
@@ -161,14 +174,13 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
             <button
               key={currentStep}
               onClick={() => {
+                resetDecision();
                 setStep(currentStep);
-                if (currentStep < 3) {
-                  setResult(null);
-                  setLoadError('');
-                }
               }}
+              disabled={isSpinning || currentStep >= step}
               aria-label={`第 ${currentStep} 步`}
-              className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs relative z-10 transition cursor-pointer ${
+              aria-current={step === currentStep ? 'step' : undefined}
+              className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs relative z-10 transition enabled:cursor-pointer ${
                 step === currentStep
                   ? 'bg-amber-500 text-white ring-4 ring-amber-100 shadow-xs'
                   : step > currentStep
@@ -200,8 +212,7 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
                   key={option.id}
                   onClick={() => {
                     setSceneChoice(option.id as SceneChoice);
-                    setResult(null);
-                    setLoadError('');
+                    resetDecision();
                     setStep(2);
                   }}
                   className={`p-4 rounded-2xl border text-left transition cursor-pointer ${
@@ -231,8 +242,7 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
                   key={flavor.val}
                   onClick={() => {
                     setFlavorChoice(flavor.val);
-                    setResult(null);
-                    setLoadError('');
+                    resetDecision();
                     setStep(3);
                   }}
                   className={`p-4 rounded-2xl border text-left transition cursor-pointer ${
@@ -251,65 +261,67 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
         {step === 3 && (
           <div className="space-y-4 animate-in fade-in duration-300">
             <h3 className="font-bold text-slate-900 text-base text-center">
-              第 3 步：预算与时间要求？
+              {sceneChoice === 'eat_out'
+                ? '第 3 步：每人想花多少钱？'
+                : sceneChoice === 'cook_at_home'
+                  ? '第 3 步：有多少时间做饭？'
+                  : '第 3 步：选个预算和做饭时间'}
             </h3>
             <div className="space-y-2.5">
               {BUDGETS.map((budget) => (
                 <button
                   key={budget.val}
-                  onClick={() => {
-                    setBudgetChoice(budget.val);
-                    void handleStartSpin(false, budget.val);
-                  }}
-                  className={`w-full p-4 rounded-2xl border text-left transition cursor-pointer ${
+                  onClick={() => void requestDecision(budget.val)}
+                  disabled={isSpinning}
+                  aria-pressed={budgetChoice === budget.val}
+                  className={`w-full p-4 rounded-2xl border text-left transition enabled:cursor-pointer disabled:cursor-wait ${
                     budgetChoice === budget.val
                       ? 'bg-amber-500 text-white border-amber-500 shadow-md font-bold'
-                      : 'bg-slate-50 hover:bg-amber-50 border-slate-200 text-slate-800'
+                      : 'bg-slate-50 enabled:hover:bg-amber-50 border-slate-200 text-slate-800'
                   }`}
                 >
                   <div className="text-sm font-bold">{budget.label}</div>
+                  <div className="text-xs mt-1">
+                    {sceneChoice !== 'cook_at_home' && budget.price}
+                    {sceneChoice === 'random' && ' · '}
+                    {sceneChoice !== 'eat_out' && `做饭 ${budget.minutes} 分钟内`}
+                  </div>
                 </button>
               ))}
             </div>
           </div>
         )}
 
-        <div className="pt-4 border-t border-slate-100 text-center space-y-4">
-          <button
-            onClick={() => void handleStartSpin()}
-            disabled={isSpinning}
-            className={`w-full py-4 rounded-2xl font-black text-base text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer ${
-              isSpinning
-                ? 'bg-amber-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:opacity-95'
-            }`}
-          >
-            {isSpinning ? (
-              <>
-                <RefreshCw className="w-5 h-5 animate-spin" />
-                正在读取真实数据并转动美食决策转盘……
-              </>
-            ) : (
-              <>
-                <Dices className="w-5 h-5" />
-                生成今天的美食最终决策
-              </>
-            )}
-          </button>
+        {isSpinning && (
+          <p role="status" className="flex items-center justify-center gap-2 rounded-xl bg-amber-50 p-3 text-sm font-medium text-amber-900">
+            <RefreshCw className="w-4 h-4 motion-safe:animate-spin" aria-hidden="true" />
+            {result ? '正在找下一个推荐…' : '正在找适合你的推荐…'}
+          </p>
+        )}
 
-          {loadError && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-              <p>{loadError}</p>
+        {issue && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+            <p role="status">{issue.message}</p>
+            {issue.kind === 'no_match' ? (
               <button
-                onClick={() => void handleStartSpin()}
-                className="mt-2 inline-flex items-center gap-1 font-bold text-red-800 cursor-pointer"
+                onClick={() => {
+                  resetDecision();
+                  setStep(2);
+                }}
+                className="mt-2 font-bold underline underline-offset-2 cursor-pointer"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                重新生成
+                换个口味
               </button>
-            </div>
-          )}
-        </div>
+            ) : budgetChoice && (
+              <button
+                onClick={() => void requestDecision(budgetChoice, Boolean(result))}
+                className="mt-2 font-bold underline underline-offset-2 cursor-pointer"
+              >
+                {issue.kind === 'setup' ? '设置好后重试' : '重试'}
+              </button>
+            )}
+          </div>
+        )}
 
         {result && (
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-5 rounded-2xl border-2 border-amber-300 shadow-sm animate-in zoom-in-95 duration-300 space-y-3 text-center">
@@ -333,6 +345,7 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
 
             <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
               <button
+                disabled={isSpinning}
                 onClick={() => {
                   trackEvent(
                     'decision_accepted',
@@ -353,29 +366,32 @@ export const DecisionWizardView: React.FC<DecisionWizardProps> = ({
                     onSelectRecipe(result.item as RecipeItem, result.reason);
                   }
                 }}
-                className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5"
+                className="px-5 py-2.5 bg-amber-500 enabled:hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs transition enabled:cursor-pointer disabled:opacity-60 flex items-center gap-1.5"
               >
                 <Utensils className="w-4 h-4" />
                 就选这个，查看详情
               </button>
 
-              <button
-                onClick={() => void handleStartSpin(true)}
-                className="px-4 py-2.5 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs rounded-xl cursor-pointer transition flex items-center gap-1.5"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
-                不满意，重新转一次
-              </button>
+              {!issue && (
+                <button
+                  onClick={requestReplacement}
+                  disabled={isSpinning}
+                  className="px-4 py-2.5 bg-white enabled:hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs rounded-xl enabled:cursor-pointer disabled:opacity-60 transition flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
+                  换一个
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400">
-          <Compass className="w-3.5 h-3.5" />
-          当前定位：{preferences.locationName}
-          <ArrowRight className="w-3 h-3" />
-          数据只在生成决策时读取
-        </div>
+        {sceneChoice !== 'cook_at_home' && (
+          <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
+            <Compass className="w-3.5 h-3.5" aria-hidden="true" />
+            {preferences.locationPoint ? `搜索位置：${preferences.locationName}` : '可在页面顶部选择餐厅搜索位置'}
+          </div>
+        )}
       </div>
     </div>
   );

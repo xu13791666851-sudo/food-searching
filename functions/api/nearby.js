@@ -101,9 +101,10 @@ function normalizeAmapPoi(poi, center) {
 
   const bizExt =
     poi.biz_ext && typeof poi.biz_ext === "object" ? poi.biz_ext : {};
-  const distanceValue = Number(amapText(poi.distance));
+  const distanceText = amapText(poi.distance);
+  const distanceValue = distanceText ? Number(distanceText) : NaN;
   const distanceMeters = Math.round(
-    Number.isFinite(distanceValue)
+    Number.isFinite(distanceValue) && distanceValue >= 0
       ? distanceValue
       : haversineDistance(center.lat, center.lng, lat, lng),
   );

@@ -7,10 +7,10 @@ const jsonHeaders = {
 };
 
 const FLAVOR_KEYWORDS = {
-  spicy: "川菜",
-  light: "粤菜",
-  healthy: "轻食",
-  savory: "煲仔饭",
+  spicy: ["川菜", "湘菜"],
+  light: ["粤菜", "汤面"],
+  healthy: ["轻食", "沙拉"],
+  savory: ["煲仔饭", "炒菜"],
 };
 
 const HEALTH_GOALS = {
@@ -21,10 +21,12 @@ const HEALTH_GOALS = {
 };
 
 const BUDGET_RULES = {
-  quick: { priceLimit: 30, timeLimit: 15, label: "快捷实惠" },
-  standard: { priceLimit: 60, timeLimit: 30, label: "标准舒适" },
-  premium: { priceLimit: 500, timeLimit: 60, label: "精致享受" },
+  quick: { priceLimit: 30, minPriceExclusive: 0, timeLimit: 15 },
+  standard: { priceLimit: 60, minPriceExclusive: 30, timeLimit: 30 },
+  premium: { priceLimit: Infinity, minPriceExclusive: 60, timeLimit: 60 },
 };
+
+class NoDecisionMatch extends Error {}
 
 export async function onRequestPost(context) {
   let body;
@@ -37,7 +39,9 @@ export async function onRequestPost(context) {
   const scene = normalizeScene(body?.scene);
   const flavor = normalizeChoice(body?.flavor, FLAVOR_KEYWORDS, "savory");
   const budget = normalizeChoice(body?.budget, BUDGET_RULES, "standard");
-  const excludeTargetId = cleanText(body?.excludeTargetId, 120);
+  const excludedIds = new Set(cleanList(body?.excludeTargetIds, 50));
+  const previousId = cleanText(body?.excludeTargetId, 120);
+  if (previousId) excludedIds.add(previousId);
   const canEatOut = isValidLocation(body?.location);
   const ingredients = cleanList(body?.ingredients, 20);
   const canCook = ingredients.length > 0;
@@ -60,7 +64,8 @@ export async function onRequestPost(context) {
         ])
       : [scene];
 
-  let lastError;
+  let upstreamError;
+  let noMatch;
   for (const candidate of candidates) {
     try {
       if (candidate === "eat_out") {
@@ -69,7 +74,7 @@ export async function onRequestPost(context) {
           body,
           flavor,
           budget,
-          excludeTargetId,
+          excludedIds,
         );
       }
       return await generateRecipeDecision(
@@ -78,14 +83,18 @@ export async function onRequestPost(context) {
         flavor,
         budget,
         ingredients,
-        excludeTargetId,
+        excludedIds,
       );
     } catch (error) {
-      lastError = error;
+      if (error instanceof NoDecisionMatch) noMatch = error;
+      else upstreamError = error;
     }
   }
 
-  console.error("Decision API error:", lastError);
+  if (!upstreamError && noMatch) {
+    return json({ ok: false, code: "NO_MATCH", message: noMatch.message }, 422);
+  }
+  console.error("Decision API error:", upstreamError);
   return json(
     { ok: false, message: "真实决策数据暂时读取失败，请稍后重新转一次。" },
     502,
@@ -97,55 +106,44 @@ async function generateRestaurantDecision(
   body,
   flavor,
   budget,
-  excludeTargetId,
+  excludedIds,
 ) {
   const location = body.location;
   const budgetRule = BUDGET_RULES[budget];
   const radius = clampNumber(body?.maxDistanceMeters, 2000, 500, 5000);
   const weather = cleanText(body?.weather, 80);
-  const keyword = FLAVOR_KEYWORDS[flavor];
-  let restaurants = await requestNearby(
-    context,
-    location,
-    radius,
-    weather,
-    keyword,
-  );
+  let hasBudgetMatch = false;
+  for (const keyword of FLAVOR_KEYWORDS[flavor]) {
+    const restaurants = await requestNearby(context, location, radius, weather, keyword);
+    const withinBudget = restaurants.filter(
+      (item) =>
+        Number.isFinite(item.pricePerPerson) &&
+        item.pricePerPerson > budgetRule.minPriceExclusive &&
+        item.pricePerPerson <= budgetRule.priceLimit,
+    );
+    hasBudgetMatch ||= withinBudget.length > 0;
+    const restaurant = pickOne(withinBudget.filter((item) => !excludedIds.has(item.id)));
+    if (!restaurant) continue;
 
-  if (!restaurants.length) {
-    restaurants = await requestNearby(context, location, radius, weather, "");
+    const locationName = cleanText(body?.locationName, 80) || "当前位置";
+    const distance = formatDistance(restaurant.distanceMeters);
+    const reason = `来自高德地图，距“${locationName}”约 ${distance}（直线）。高德参考人均约 ¥${restaurant.pricePerPerson}，在所选预算范围内。按“${keyword}”查询。`;
+
+    return json({
+      ok: true,
+      source: "amap",
+      type: "restaurant",
+      generatedAt: new Date().toISOString(),
+      item: restaurant,
+      reason,
+    });
   }
 
-  const withinBudget = restaurants.filter(
-    (item) =>
-      !item.pricePerPerson || item.pricePerPerson <= budgetRule.priceLimit,
+  throw new NoDecisionMatch(
+    hasBudgetMatch
+      ? "这轮符合条件的门店都推荐过了。可以调整预算、口味或距离。"
+      : "没找到有参考人均价且符合预算的门店。可以调整预算、口味或距离。",
   );
-  const pool = (withinBudget.length ? withinBudget : restaurants).filter(
-    (item) => item.id !== excludeTargetId,
-  );
-  const fallbackPool = withinBudget.length ? withinBudget : restaurants;
-  const restaurant = pickOne(pool.length ? pool : fallbackPool);
-
-  if (!restaurant) throw new Error("No real restaurant available");
-
-  const priceText = restaurant.pricePerPerson
-    ? `高德参考人均约 ¥${restaurant.pricePerPerson}`
-    : "高德暂未提供人均价格";
-  const reason = `来自高德地图的真实门店，距“${cleanText(
-    body?.locationName,
-    80,
-  ) || "当前位置"}”约 ${formatDistance(
-    restaurant.distanceMeters,
-  )}；${priceText}，符合“${budgetRule.label}”和当前口味方向。`;
-
-  return json({
-    ok: true,
-    source: "amap",
-    type: "restaurant",
-    generatedAt: new Date().toISOString(),
-    item: restaurant,
-    reason,
-  });
 }
 
 async function requestNearby(
@@ -181,7 +179,7 @@ async function generateRecipeDecision(
   flavor,
   budget,
   ingredients,
-  excludeTargetId,
+  excludedIds,
 ) {
   const budgetRule = BUDGET_RULES[budget];
   const request = new Request(context.request.url, {
@@ -204,9 +202,11 @@ async function generateRecipeDecision(
     throw new Error(data?.message || "Recipe request failed");
   }
 
-  const pool = data.recipes.filter((item) => item.id !== excludeTargetId);
-  const recipe = pickOne(pool.length ? pool : data.recipes);
-  if (!recipe) throw new Error("No real recipe available");
+  const pool = data.recipes.filter((item) => !excludedIds.has(item.id));
+  const recipe = pickOne(pool);
+  if (!recipe) {
+    throw new NoDecisionMatch("当前条件下没有其他菜谱。可以换口味、时间或食材。");
+  }
 
   return json({
     ok: true,
@@ -215,7 +215,7 @@ async function generateRecipeDecision(
     type: "recipe",
     generatedAt: data.generatedAt || new Date().toISOString(),
     item: recipe,
-    reason: `${recipe.recommendReason} 已按“${budgetRule.label}”控制在 ${budgetRule.timeLimit} 分钟内，并避开你的忌口。`,
+    reason: `${recipe.recommendReason.replace(/[。；，、\s]+$/, "")}。预计烹饪 ${recipe.cookingTimeMinutes} 分钟。`,
   });
 }
 
@@ -232,12 +232,14 @@ function normalizeChoice(value, choices, fallback) {
 }
 
 function isValidLocation(value) {
-  return (
-    Number.isFinite(Number(value?.lat)) &&
-    Number.isFinite(Number(value?.lng)) &&
-    Math.abs(Number(value.lat)) <= 90 &&
-    Math.abs(Number(value.lng)) <= 180
-  );
+  return isValidCoordinate(value?.lat, 90) && isValidCoordinate(value?.lng, 180);
+}
+
+function isValidCoordinate(value, limit) {
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) {
+    return false;
+  }
+  return Math.abs(Number(value)) <= limit;
 }
 
 function pickOne(items) {
