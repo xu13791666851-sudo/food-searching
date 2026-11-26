@@ -1,20 +1,46 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# 今天吃什么 · Food Searching
 
-# Run and deploy your AI Studio app
+「今天吃什么」是一款日常饮食决策助手。下雨天想在附近吃碗 30 元以内的热汤面，可以用一句话说出位置、预算和口味。想在家做饭，就选冰箱里已有的食材，让 AI 给出菜谱和做法。
 
-This contains everything you need to run your app locally.
+## 可以做什么
 
-View your app in AI Studio: https://ai.studio/apps/71b9f252-1ec4-403d-9f26-fb046e994250
+| 功能 | 怎么用 |
+| --- | --- |
+| AI 对话 | 用日常语言说需求，接着追问「离我更近一点」或「预算再低一点」。推荐会参考位置、天气和饮食偏好。 |
+| 外面吃 | 在页面顶部定位或手动选地点，查看高德地图上的附近餐厅，按距离和预算筛选，也可查看地图和打开导航。 |
+| 在家吃 | 选择已有食材，按时间、难度和忌口生成菜谱，查看用料与步骤。 |
+| 分步转盘 | 选择外食或在家做，再选口味和预算档位，得到一项推荐，也可以点「换一个」。 |
+| 我的偏好 | 设置忌口、默认预算和距离，回看收藏的餐厅、菜谱和历史决策。 |
 
-## Run Locally
+## 本地运行
 
-**Prerequisites:**  Node.js
+使用 Node.js 24，在仓库根目录运行以下命令。
 
+```bash
+npm ci
+npm run dev
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+启动后，在浏览器打开 `http://localhost:3000`。不填密钥也能打开页面，体验基础对话和偏好设置。
+
+### 启用地图和 AI
+
+在仓库根目录新建 `.env`，按需要填入自己的密钥，然后重启服务。
+
+| 配置项 | 用途 |
+| --- | --- |
+| `AMAP_KEY` | 高德地图 **Web 服务**密钥，用于地点搜索、附近餐厅和天气。 |
+| `GEMINI_API_KEY`、`DEEPSEEK_API_KEY` 或 `OPENAI_API_KEY` | 三选一，用于 AI 对话和实时生成菜谱。 |
+
+例如使用高德地图和 Gemini 时，`.env` 可以这样写。
+
+```dotenv
+AMAP_KEY=你的高德Web服务密钥
+GEMINI_API_KEY=你的Gemini密钥
+```
+
+配置好后，可打开 `http://localhost:3000/api/health` 检查地图和 AI 配置是否已加载。
+
+## 项目入口
+
+原有的 Google AI Studio 项目入口需要登录。[在 Google AI Studio 打开](https://ai.studio/apps/71b9f252-1ec4-403d-9f26-fb046e994250)
